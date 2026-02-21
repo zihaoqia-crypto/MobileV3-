@@ -1,0 +1,1334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>MIRRA — Facial Intelligence</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,200;9..40,300;9..40,400;9..40,500&family=DM+Mono:wght@300;400;500&display=swap');
+:root{
+  --bg:#030308;--s1:#07070f;--s2:#0c0c1a;
+  --cyan:#00dfc4;--cyan2:#00b8ff;
+  --warm:#ffd580;--green:#3dffa0;--red:#ff5252;
+  --txt:#eaecf4;--txt2:rgba(234,236,244,0.5);--txt3:rgba(234,236,244,0.25);
+  --border:rgba(0,223,196,0.13);--border2:rgba(0,223,196,0.26);
+  --glass:rgba(6,6,16,0.85);
+  --mono:'DM Mono',monospace;--sans:'DM Sans',sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+html,body{width:100%;height:100%;background:#010106;overflow:hidden;font-family:var(--sans);color:var(--txt);}
+.shell{width:100vw;height:100vh;display:flex;align-items:center;justify-content:center;
+  background:radial-gradient(ellipse 55% 35% at 15% 85%,rgba(0,223,196,0.05),transparent 60%),
+             radial-gradient(ellipse 45% 45% at 85% 15%,rgba(0,184,255,0.04),transparent 60%),#010106;}
+.phone{width:390px;height:844px;border-radius:52px;overflow:hidden;position:relative;background:var(--bg);
+  box-shadow:0 0 0 1px rgba(255,255,255,0.06),0 0 0 10px #090912,0 0 0 11px rgba(255,255,255,0.035),
+             0 60px 180px rgba(0,0,0,0.96),inset 0 0 0 1px rgba(255,255,255,0.02);}
+/* STATUS */
+.sb{position:absolute;top:0;left:0;right:0;z-index:300;height:52px;display:flex;align-items:flex-end;
+    justify-content:space-between;padding:0 26px 8px;pointer-events:none;}
+.sb-t{font-family:var(--mono);font-size:12px;font-weight:500;}
+.sb-ic{display:flex;gap:5px;align-items:center;}
+/* SCREENS */
+.scr{position:absolute;inset:0;display:flex;flex-direction:column;opacity:0;pointer-events:none;
+     transition:opacity .38s cubic-bezier(.4,0,.2,1);}
+.scr.on{opacity:1;pointer-events:all;}
+/* ─ SCAN ─ */
+#s-scan{background:var(--bg);}
+.scan-wrap{position:relative;flex:1;overflow:hidden;background:#000;}
+#sv{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1);}
+#so{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;}
+/* Face oval guide – clean static ring */
+.fg{position:absolute;top:50%;left:50%;width:220px;height:290px;transform:translate(-50%,-54%);
+    border-radius:50%;border:2px solid rgba(0,223,196,0.35);pointer-events:none;
+    box-shadow:0 0 0 1px rgba(0,223,196,0.08) inset;}
+.fga{display:none;} /* removed spinning arc */
+.fc{position:absolute;width:22px;height:22px;border-color:var(--cyan);border-style:solid;}
+.fc.tl{top:-1px;left:-1px;border-width:2.5px 0 0 2.5px;border-radius:5px 0 0 0;}
+.fc.tr{top:-1px;right:-1px;border-width:2.5px 2.5px 0 0;border-radius:0 5px 0 0;}
+.fc.bl{bottom:-1px;left:-1px;border-width:0 0 2.5px 2.5px;border-radius:0 0 0 5px;}
+.fc.br{bottom:-1px;right:-1px;border-width:0 2.5px 2.5px 0;border-radius:0 0 5px 0;}
+/* Head-turn step indicator */
+.hturn{position:absolute;top:50%;left:50%;transform:translate(-50%,-54%);
+       width:220px;height:290px;pointer-events:none;z-index:8;}
+/* Arrow guides for head turn */
+.hturn-arrow{
+  position:absolute;top:50%;
+  display:flex;align-items:center;gap:6px;
+  font-family:var(--mono);font-size:11px;letter-spacing:1.5px;text-transform:uppercase;
+  color:var(--cyan);opacity:0;transition:opacity .4s,transform .4s;
+  white-space:nowrap;
+}
+.hturn-arrow.left{right:calc(100% + 14px);transform:translateY(-50%) translateX(6px);}
+.hturn-arrow.right{left:calc(100% + 14px);transform:translateY(-50%) translateX(-6px);}
+.hturn-arrow.up{top:auto;bottom:calc(100% + 10px);left:50%;transform:translateX(-50%) translateY(6px);flex-direction:column;}
+.hturn-arrow.show{opacity:1;}
+.hturn-arrow.left.show{transform:translateY(-50%) translateX(0);}
+.hturn-arrow.right.show{transform:translateY(-50%) translateX(0);}
+.hturn-arrow.up.show{transform:translateX(-50%) translateY(0);}
+/* Step dots */
+.scan-steps{position:absolute;bottom:108px;left:0;right:0;display:flex;justify-content:center;gap:8px;z-index:10;}
+.sstep{width:28px;height:3px;border-radius:2px;background:rgba(255,255,255,.12);transition:background .4s;}
+.sstep.done{background:var(--cyan);}
+.sstep.active{background:rgba(0,223,196,.5);}
+/* Checkmark overlay */
+#scan-check{position:absolute;top:50%;left:50%;transform:translate(-50%,-54%);
+  font-size:52px;opacity:0;transition:opacity .4s;z-index:9;pointer-events:none;}
+/* removed scan line and arc SVG - no longer needed */
+#sl{display:none;}
+.sasvg{display:none;}
+.sht{position:absolute;top:60px;left:0;right:0;display:flex;justify-content:space-between;
+     align-items:center;padding:0 20px;z-index:10;}
+.sback{background:none;border:none;color:var(--txt2);font-family:var(--sans);font-size:13px;cursor:pointer;transition:color .2s;}
+.sback:hover{color:var(--txt);}
+.stitle{font-family:var(--mono);font-size:9px;letter-spacing:3px;text-transform:uppercase;color:var(--txt3);}
+#sctr{position:absolute;top:50%;left:50%;transform:translate(-50%,-54%);
+      font-size:72px;font-weight:200;letter-spacing:-5px;color:rgba(0,223,196,.18);
+      z-index:6;pointer-events:none;transition:all .3s;}
+.sbot{position:absolute;bottom:0;left:0;right:0;padding:0 24px 44px;z-index:10;
+      background:linear-gradient(to top,var(--bg) 55%,transparent);}
+.ssw{text-align:center;margin-bottom:20px;}
+.ssm{font-size:16px;font-weight:300;margin-bottom:4px;transition:all .4s;}
+.sss{font-family:var(--mono);font-size:9px;color:var(--txt3);letter-spacing:2px;text-transform:uppercase;transition:all .4s;}
+.sbtn{width:100%;height:54px;border-radius:17px;
+      background:linear-gradient(135deg,rgba(0,223,196,.14),rgba(0,184,255,.07));
+      border:1px solid var(--border2);color:var(--cyan);font-family:var(--sans);
+      font-size:14px;font-weight:500;cursor:pointer;
+      display:flex;align-items:center;justify-content:center;gap:9px;transition:all .22s;}
+.sbtn:hover{background:rgba(0,223,196,.18);}
+.sbtn:active{transform:scale(.98);}
+.sbtn:disabled{opacity:.4;pointer-events:none;}
+.qbw{position:absolute;bottom:130px;left:24px;right:24px;z-index:10;opacity:0;transition:opacity .4s;}
+.qbw.show{opacity:1;}
+.qbh{display:flex;justify-content:space-between;margin-bottom:5px;}
+.qbl{font-family:var(--mono);font-size:8px;letter-spacing:2px;text-transform:uppercase;color:var(--txt3);}
+.qbv{font-family:var(--mono);font-size:8px;color:var(--cyan);}
+.qbt{height:2px;border-radius:1px;background:rgba(255,255,255,.06);}
+.qbf{height:100%;border-radius:1px;background:linear-gradient(90deg,var(--cyan2),var(--cyan));transition:width .3s;}
+.cerr{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;
+      gap:14px;padding:40px;text-align:center;background:var(--bg);z-index:20;}
+.cerr.show{display:flex;}
+.ceri{font-size:44px;opacity:.35;}
+.cert{font-size:16px;font-weight:300;}
+.cers{font-size:11px;color:var(--txt3);line-height:1.7;}
+/* ─ 3D STAGES ─ */
+.stage3d{position:relative;flex:1;overflow:hidden;min-height:490px;
+         background:radial-gradient(ellipse 75% 85% at 50% 38%,#081624 0%,#030308 100%);}
+.stagecanvas{position:absolute;inset:0;width:100%;height:100%;cursor:grab;touch-action:none;}
+.stagecanvas:active{cursor:grabbing;}
+.vignet{position:absolute;inset:0;pointer-events:none;
+        background:radial-gradient(ellipse 65% 72% at 50% 42%,transparent 30%,rgba(3,3,8,.52) 68%,rgba(3,3,8,.97) 100%);}
+/* Metric tags */
+.mtag{position:absolute;display:flex;align-items:center;gap:6px;padding:5px 11px;border-radius:20px;
+      background:var(--glass);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);
+      border:1px solid var(--border);font-size:10px;color:var(--txt2);white-space:nowrap;
+      opacity:0;transform:translateY(4px);transition:opacity .5s,transform .5s;pointer-events:none;}
+.mtag.show{opacity:1;transform:translateY(0);}
+.mtag .dot{width:5px;height:5px;border-radius:50%;flex-shrink:0;}
+/* Style badge */
+.sbadge{position:absolute;top:68px;left:50%;transform:translateX(-50%);font-family:var(--mono);
+        font-size:9px;letter-spacing:2.5px;text-transform:uppercase;padding:5px 15px;border-radius:20px;
+        background:rgba(0,223,196,.07);border:1px solid rgba(0,223,196,.18);color:var(--cyan);
+        white-space:nowrap;transition:all .4s;}
+/* Live pill */
+.livepill{position:absolute;top:68px;right:16px;display:flex;align-items:center;gap:6px;
+           padding:5px 12px;border-radius:20px;background:rgba(0,0,0,.5);backdrop-filter:blur(12px);
+           border:1px solid rgba(0,223,196,.14);font-family:var(--mono);font-size:8px;letter-spacing:1.5px;text-transform:uppercase;}
+.livdot{width:5px;height:5px;border-radius:50%;background:var(--green);animation:lp 1.8s infinite;}
+@keyframes lp{0%,100%{box-shadow:0 0 0 0 rgba(61,255,160,.4);}50%{box-shadow:0 0 0 5px rgba(61,255,160,0);}}
+.livlbl{color:var(--txt2);}
+/* Drag hint */
+.dragh{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);
+       font-family:var(--mono);font-size:8px;letter-spacing:2px;text-transform:uppercase;color:var(--txt3);
+       display:flex;align-items:center;gap:5px;opacity:1;transition:opacity 1.2s;pointer-events:none;z-index:10;}
+.dragh.hide{opacity:0;}
+/* ─ PULL PANEL ─ */
+.pp{position:absolute;bottom:0;left:0;right:0;z-index:50;
+    transform:translateY(270px);transition:transform .5s cubic-bezier(.32,.72,0,1);}
+.pp.open{transform:translateY(0);}
+.ph{display:flex;justify-content:center;align-items:center;height:26px;cursor:pointer;}
+.phb{width:36px;height:3px;border-radius:2px;background:rgba(255,255,255,.18);transition:all .2s;}
+.ph:hover .phb{background:rgba(255,255,255,.36);width:48px;}
+.pb{background:var(--glass);backdrop-filter:blur(52px) saturate(170%);-webkit-backdrop-filter:blur(52px) saturate(170%);
+    border-top:1px solid var(--border);padding:6px 20px 20px;}
+.pe{font-family:var(--mono);font-size:8px;letter-spacing:3px;text-transform:uppercase;color:var(--txt3);margin-bottom:5px;}
+.pt{font-size:19px;font-weight:300;margin-bottom:2px;}
+.ps{font-size:11px;color:var(--txt2);margin-bottom:14px;}
+.mgrid{display:flex;gap:8px;margin-bottom:14px;}
+.mc{flex:1;padding:11px 10px;border-radius:12px;background:rgba(255,255,255,.025);border:1px solid var(--border);}
+.mcv{font-family:var(--mono);font-size:17px;font-weight:500;
+     background:linear-gradient(135deg,var(--cyan),var(--cyan2));-webkit-background-clip:text;-webkit-text-fill-color:transparent;}
+.mcl{font-size:8px;color:var(--txt3);letter-spacing:1px;text-transform:uppercase;margin-top:2px;}
+.mcb{height:2px;border-radius:1px;background:rgba(255,255,255,.05);margin-top:6px;overflow:hidden;}
+.mcbf{height:100%;border-radius:1px;background:linear-gradient(90deg,var(--cyan2),var(--cyan));}
+.slist{display:flex;flex-direction:column;gap:11px;overflow-y:auto;max-height:170px;padding-right:2px;}
+.slist::-webkit-scrollbar{width:2px;}
+.slist::-webkit-scrollbar-thumb{background:rgba(0,223,196,.2);border-radius:1px;}
+.si{display:flex;flex-direction:column;gap:6px;}
+.sih{display:flex;justify-content:space-between;}
+.sin{font-size:11px;color:var(--txt2);}
+.siv{font-family:var(--mono);font-size:10px;color:var(--cyan);}
+.sit{height:3px;border-radius:2px;background:rgba(255,255,255,.06);position:relative;}
+.sif{position:absolute;top:0;left:0;height:100%;border-radius:2px;background:linear-gradient(90deg,var(--cyan2),var(--cyan));}
+/* Style swatches */
+.ssw2{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px;}
+.sw{height:70px;border-radius:12px;overflow:hidden;cursor:pointer;position:relative;
+    border:1.5px solid var(--border);transition:all .22s;}
+.sw:hover{border-color:var(--border2);transform:translateY(-1px);}
+.sw.on{border-color:var(--cyan);box-shadow:0 0 14px rgba(0,223,196,.2);}
+.sw-bg{position:absolute;inset:0;}
+.sw-l{position:absolute;bottom:0;left:0;right:0;padding:5px 8px;font-size:9px;font-weight:500;
+      background:linear-gradient(to top,rgba(3,3,8,.95),transparent);color:var(--txt2);transition:color .2s;}
+.sw.on .sw-l{color:var(--cyan);}
+.sw-neural{background:linear-gradient(135deg,#0a0520,#082038,#160a24);}
+.sw-chrome{background:linear-gradient(135deg,#141414,#222230,#0e0e1a);}
+.sw-ember{background:linear-gradient(135deg,#240608,#3c1200,#1a0400);}
+.sw-bio{background:linear-gradient(135deg,#051205,#0e2c12,#050c05);}
+.sw-frost{background:linear-gradient(135deg,#05101e,#102230,#050814);}
+.sw-dusk{background:linear-gradient(135deg,#180524,#260838,#0e0418);}
+.inrow{display:flex;align-items:center;gap:12px;margin-bottom:14px;}
+.inlbl{font-size:11px;color:var(--txt2);flex-shrink:0;width:60px;}
+.insl{flex:1;accent-color:var(--cyan);}
+.inv{font-family:var(--mono);font-size:10px;color:var(--cyan);width:30px;text-align:right;}
+/* Adjust */
+.agroups{display:flex;flex-direction:column;gap:10px;overflow-y:auto;max-height:200px;}
+.agroups::-webkit-scrollbar{width:2px;}
+.agroups::-webkit-scrollbar-thumb{background:rgba(0,223,196,.15);}
+.ag{padding:11px 12px;border-radius:12px;background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.04);}
+.agt{font-family:var(--mono);font-size:8px;letter-spacing:2px;text-transform:uppercase;color:var(--txt3);margin-bottom:9px;}
+.asl{display:flex;align-items:center;gap:10px;margin-bottom:7px;}
+.asl:last-child{margin-bottom:0;}
+.asll{font-size:11px;color:var(--txt2);width:76px;flex-shrink:0;}
+.asli{flex:1;accent-color:var(--cyan);}
+.aslv{font-family:var(--mono);font-size:9px;color:var(--cyan);width:26px;text-align:right;}
+.abtns{display:flex;gap:8px;margin-top:12px;}
+.ab{flex:1;height:40px;border-radius:10px;cursor:pointer;font-family:var(--sans);font-size:12px;transition:all .2s;}
+.ab.g{background:transparent;border:1px solid var(--border);color:var(--txt2);}
+.ab.g:hover{border-color:var(--border2);color:var(--txt);}
+.ab.a{background:rgba(0,223,196,.09);border:1px solid var(--border2);color:var(--cyan);}
+/* ─ CAMERA ─ */
+#s-camera{background:#000;}
+.camstage{position:relative;flex:1;overflow:hidden;background:#000;}
+#camv{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1);}
+#camo{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;}
+.camvig{position:absolute;inset:0;pointer-events:none;
+        background:radial-gradient(ellipse 60% 70% at 50% 42%,transparent 30%,rgba(0,0,0,.35) 65%,rgba(0,0,0,.85) 100%);}
+.camhud{position:absolute;top:60px;left:14px;right:14px;display:flex;justify-content:space-between;z-index:10;}
+.crd{display:flex;flex-direction:column;gap:3px;align-items:flex-end;}
+.cr{font-family:var(--mono);font-size:9px;letter-spacing:1px;color:rgba(0,223,196,.55);}
+.cr.b{color:var(--cyan);}
+.tfpill{display:flex;align-items:center;gap:6px;padding:5px 11px;border-radius:20px;
+        background:rgba(0,0,0,.55);backdrop-filter:blur(14px);border:1px solid rgba(0,223,196,.15);
+        font-family:var(--mono);font-size:8px;letter-spacing:1.5px;text-transform:uppercase;}
+.tfd{width:5px;height:5px;border-radius:50%;}
+.tfd.on{background:var(--green);animation:lp 2s infinite;}
+.tfd.off{background:var(--txt3);}
+.tfl{color:var(--cyan);}
+.facebox{position:absolute;border:1px solid rgba(0,223,196,.22);border-radius:4px;
+         pointer-events:none;display:none;transition:all .1s;}
+.facebox::before,.facebox::after{content:'';position:absolute;border-color:var(--cyan);border-style:solid;}
+.facebox::before{top:-1px;left:-1px;width:22px;height:22px;border-width:2px 0 0 2px;border-radius:3px 0 0 0;}
+.facebox::after{bottom:-1px;right:-1px;width:22px;height:22px;border-width:0 2px 2px 0;border-radius:0 0 3px 0;}
+/* Camera controls: normal flow below the video stage */
+.camctrl{flex-shrink:0;padding:12px 20px 8px;
+         background:linear-gradient(to top,rgba(3,3,8,1) 0%,rgba(3,3,8,.95) 100%);
+         border-top:1px solid rgba(255,255,255,.04);}
+.tfbar{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-radius:12px;
+       background:rgba(0,223,196,.05);border:1px solid rgba(0,223,196,.1);margin-bottom:10px;}
+.tfbt{font-size:11px;color:var(--cyan);font-weight:500;}
+.tfbs{font-size:9px;color:var(--txt3);margin-top:1px;}
+.tfbi{width:8px;height:8px;border-radius:50%;background:var(--green);animation:lp 2s infinite;}
+.shutrow{display:flex;align-items:center;justify-content:space-between;}
+.sidebtn{width:44px;height:44px;border-radius:13px;background:rgba(255,255,255,.07);
+         border:1px solid rgba(255,255,255,.1);display:flex;align-items:center;justify-content:center;
+         font-size:18px;cursor:pointer;transition:all .2s;}
+.sidebtn:hover{background:rgba(255,255,255,.12);}
+.shut{width:70px;height:70px;border-radius:50%;background:#fff;border:3.5px solid rgba(255,255,255,.25);
+      cursor:pointer;box-shadow:0 0 0 1px rgba(0,223,196,.25),0 0 28px rgba(0,223,196,.08);
+      transition:transform .12s;position:relative;}
+.shut::after{content:'';position:absolute;inset:8px;border-radius:50%;background:rgba(0,0,0,.06);}
+.shut:active{transform:scale(.88);}
+.cchips{display:flex;gap:7px;justify-content:center;}
+.cc{padding:6px 14px;border-radius:16px;font-size:10px;font-weight:500;
+    border:1px solid rgba(255,255,255,.1);color:rgba(255,255,255,.38);
+    cursor:pointer;background:transparent;transition:all .2s;}
+.cc.on{background:rgba(0,223,196,.1);border-color:var(--border2);color:var(--cyan);}
+.photoprev{position:absolute;inset:0;z-index:200;background:rgba(3,3,8,.95);
+           display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;
+           opacity:0;pointer-events:none;transition:opacity .3s;}
+.photoprev.show{opacity:1;pointer-events:all;}
+#phcanv{border-radius:16px;border:1px solid var(--border);}
+.ppbtns{display:flex;gap:12px;}
+.ppbtn{padding:10px 26px;border-radius:12px;font-family:var(--sans);font-size:13px;cursor:pointer;transition:all .2s;}
+.ppsave{background:rgba(0,223,196,.11);border:1px solid var(--border2);color:var(--cyan);}
+.ppdisc{background:transparent;border:1px solid rgba(255,255,255,.1);color:var(--txt2);}
+.flash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none;z-index:300;transition:opacity .08s;}
+.flash.on{opacity:.95;}
+/* ─ NAVBAR ─ */
+.navbar{position:absolute;bottom:0;left:0;right:0;z-index:100;height:82px;
+        display:flex;align-items:flex-start;justify-content:space-around;padding:9px 4px 0;
+        background:linear-gradient(to top,var(--bg) 52%,transparent);}
+.ni{display:flex;flex-direction:column;align-items:center;gap:4px;padding:7px 10px;
+    border-radius:14px;cursor:pointer;min-width:56px;transition:all .2s;}
+.niw{width:42px;height:42px;border-radius:13px;display:flex;align-items:center;justify-content:center;
+     position:relative;transition:all .2s;}
+.ni.on .niw{background:rgba(0,223,196,.1);}
+.ni:hover .niw{background:rgba(255,255,255,.04);}
+.nd{position:absolute;bottom:-4px;left:50%;transform:translateX(-50%);width:4px;height:4px;
+    border-radius:50%;background:var(--cyan);opacity:0;transition:opacity .2s;}
+.ni.on .nd{opacity:1;}
+.ni svg{width:22px;height:22px;}
+.nl{font-size:9px;font-weight:500;letter-spacing:.3px;color:var(--txt3);transition:color .2s;}
+.ni.on .nl{color:var(--cyan);}
+/* Style transfer - source template upload */
+.st-source-row{display:flex;gap:8px;align-items:center;margin-bottom:14px;padding:10px 12px;
+               border-radius:12px;border:1px dashed rgba(0,223,196,.25);background:rgba(0,223,196,.03);}
+.st-source-thumb{width:44px;height:44px;border-radius:10px;border:1px solid var(--border);
+                 background:rgba(255,255,255,.04);display:flex;align-items:center;justify-content:center;
+                 overflow:hidden;flex-shrink:0;cursor:pointer;position:relative;}
+.st-source-thumb img{width:100%;height:100%;object-fit:cover;display:none;}
+.st-source-thumb .plus{font-size:20px;color:var(--txt3);transition:opacity .2s;}
+.st-source-info{flex:1;}
+.st-source-title{font-size:11px;font-weight:500;color:var(--txt);margin-bottom:2px;}
+.st-source-sub{font-size:9px;color:var(--txt3);}
+.st-upload-btn{padding:7px 14px;border-radius:10px;border:1px solid var(--border2);
+               background:rgba(0,223,196,.08);color:var(--cyan);font-family:var(--sans);
+               font-size:11px;font-weight:500;cursor:pointer;white-space:nowrap;transition:all .2s;}
+.st-upload-btn:hover{background:rgba(0,223,196,.15);}
+#st-file-input{display:none;}
+/* Feature data grid in analyze */
+.feat-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:12px;}
+.fg-cell{padding:7px 9px;border-radius:9px;background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.05);}
+.fg-cell-lbl{font-family:var(--mono);font-size:7.5px;letter-spacing:1.5px;text-transform:uppercase;color:var(--txt3);margin-bottom:3px;}
+.fg-cell-val{font-family:var(--mono);font-size:13px;font-weight:500;color:var(--txt);}
+.fg-cell-unit{font-size:8.5px;color:var(--txt3);margin-left:1px;}
+/* TOAST */
+.toast{position:absolute;top:64px;left:50%;transform:translateX(-50%);
+       padding:7px 18px;border-radius:20px;background:rgba(0,223,196,.11);
+       backdrop-filter:blur(20px);border:1px solid rgba(0,223,196,.22);
+       font-family:var(--mono);font-size:10px;letter-spacing:1px;color:var(--cyan);
+       white-space:nowrap;z-index:999;pointer-events:none;
+       animation:tin .3s ease,tout .35s ease 2.3s forwards;}
+@keyframes tin{from{opacity:0;transform:translateX(-50%) translateY(-7px);}to{opacity:1;transform:translateX(-50%) translateY(0);}}
+@keyframes tout{to{opacity:0;transform:translateX(-50%) translateY(-6px);}}
+@media(max-width:420px){.shell{padding:0;}.phone{width:100vw;height:100vh;border-radius:0;box-shadow:none;}}
+@keyframes spin2{to{transform:rotate(360deg);}}
+#ai-report-content::-webkit-scrollbar{width:2px;}
+#ai-report-content::-webkit-scrollbar-thumb{background:rgba(0,223,196,.2);border-radius:1px;}
+.ai-sec{margin-bottom:11px;}
+.ai-sec:last-child{margin-bottom:0;}
+.ai-sec-t{font-family:var(--mono);font-size:8px;letter-spacing:2px;text-transform:uppercase;color:var(--cyan);margin-bottom:5px;}
+.ai-hl{color:var(--txt);font-weight:500;}
+</style>
+</head>
+<body>
+<div class="shell"><div class="phone" id="phone">
+
+<!-- STATUS BAR -->
+<div class="sb">
+  <span class="sb-t" id="sbt">9:41</span>
+  <div class="sb-ic">
+    <svg width="15" height="11" viewBox="0 0 15 11" fill="none"><rect x="0" y="5" width="2.2" height="6" rx=".5" fill="white" opacity=".5"/><rect x="3.5" y="3" width="2.2" height="8" rx=".5" fill="white" opacity=".7"/><rect x="7" y="1" width="2.2" height="10" rx=".5" fill="white" opacity=".9"/><rect x="10.5" y="0" width="2.2" height="11" rx=".5" fill="white"/></svg>
+    <svg width="14" height="11" viewBox="0 0 14 11" fill="none"><path d="M7 2C9.6 2 11.8 3.3 13 5.2" stroke="white" stroke-width="1.3" stroke-linecap="round" opacity=".45"/><path d="M7 4.8C8.8 4.8 10.3 5.7 11.2 7.1" stroke="white" stroke-width="1.3" stroke-linecap="round" opacity=".7"/><path d="M7 7.5C8.1 7.5 9 8.1 9.5 9" stroke="white" stroke-width="1.3" stroke-linecap="round"/><circle cx="7" cy="10.5" r=".9" fill="white"/></svg>
+    <svg width="24" height="12" viewBox="0 0 24 12" fill="none"><rect x=".5" y=".5" width="20" height="11" rx="2.5" stroke="white" stroke-opacity=".35"/><path d="M22 4v4a2 2 0 000-4z" fill="white" fill-opacity=".35"/><rect x="2" y="2" width="15" height="8" rx="1.5" fill="white"/></svg>
+  </div>
+</div>
+
+<!-- ═══ SCAN SCREEN ═══ -->
+<div class="scr on" id="s-scan">
+  <div class="scan-wrap" id="swrap">
+    <video id="sv" autoplay muted playsinline></video>
+    <canvas id="so"></canvas>
+
+    <!-- Face guide oval -->
+    <div class="fg" id="fg">
+      <div class="fc tl"></div><div class="fc tr"></div>
+      <div class="fc bl"></div><div class="fc br"></div>
+    </div>
+
+    <!-- Head-turn animated arrow — shown during active scan steps -->
+    <div id="ht-arrow-wrap" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-54%);width:220px;height:290px;pointer-events:none;z-index:9;">
+      <!-- Left arrow -->
+      <div id="ht-left" style="position:absolute;top:50%;left:-52px;transform:translateY(-50%);opacity:0;transition:opacity .4s,transform .5s;display:flex;flex-direction:column;align-items:center;gap:3px;">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#00dfc4" stroke-width="2.5" stroke-linecap="round"><path d="M15 18l-6-6 6-6"/></svg>
+        <span style="font-family:var(--mono);font-size:8px;letter-spacing:2px;color:var(--cyan);text-transform:uppercase;">Left</span>
+      </div>
+      <!-- Right arrow -->
+      <div id="ht-right" style="position:absolute;top:50%;right:-52px;transform:translateY(-50%);opacity:0;transition:opacity .4s,transform .5s;display:flex;flex-direction:column;align-items:center;gap:3px;">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#00dfc4" stroke-width="2.5" stroke-linecap="round"><path d="M9 18l6-6-6-6"/></svg>
+        <span style="font-family:var(--mono);font-size:8px;letter-spacing:2px;color:var(--cyan);text-transform:uppercase;">Right</span>
+      </div>
+      <!-- Up arrow -->
+      <div id="ht-up" style="position:absolute;bottom:-46px;left:50%;transform:translateX(-50%);opacity:0;transition:opacity .4s;display:flex;flex-direction:column;align-items:center;gap:3px;">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#00dfc4" stroke-width="2.5" stroke-linecap="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+        <span style="font-family:var(--mono);font-size:8px;letter-spacing:2px;color:var(--cyan);text-transform:uppercase;">Look Up</span>
+      </div>
+      <!-- Down arrow -->
+      <div id="ht-down" style="position:absolute;top:-46px;left:50%;transform:translateX(-50%);opacity:0;transition:opacity .4s;display:flex;flex-direction:column-reverse;align-items:center;gap:3px;">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#00dfc4" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
+        <span style="font-family:var(--mono);font-size:8px;letter-spacing:2px;color:var(--cyan);text-transform:uppercase;">Look Down</span>
+      </div>
+      <!-- Checkmark -->
+      <div id="scan-check" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:52px;opacity:0;transition:opacity .4s;">✓</div>
+    </div>
+
+    <!-- Step progress dots -->
+    <div class="scan-steps">
+      <div class="sstep active" id="sstep-0"></div>
+      <div class="sstep" id="sstep-1"></div>
+      <div class="sstep" id="sstep-2"></div>
+      <div class="sstep" id="sstep-3"></div>
+    </div>
+
+    <!-- Face lock quality -->
+    <div class="qbw" id="qbw">
+      <div class="qbh"><span class="qbl">Face Lock Quality</span><span class="qbv" id="qbv">—</span></div>
+      <div class="qbt"><div class="qbf" id="qbf" style="width:0%"></div></div>
+    </div>
+
+    <!-- Camera error -->
+    <div class="cerr" id="cerr">
+      <div class="ceri">📷</div>
+      <div class="cert" id="cerr-title">Camera Access Required</div>
+      <div class="cers" id="cerr-msg">Allow camera access in your browser<br>to use MIRRA 3D face scanning</div>
+      <div id="cerr-detail" style="font-family:var(--mono);font-size:8px;color:var(--txt3);letter-spacing:1px;margin-top:8px;padding:8px 14px;border-radius:8px;background:rgba(255,255,255,.04);text-align:left;max-width:280px;word-break:break-word;display:none;"></div>
+      <div style="display:flex;flex-direction:column;gap:8px;width:100%;align-items:center;margin-top:12px;">
+        <button class="sbtn" style="width:auto;padding:0 28px;" onclick="initScan()">Try Again</button>
+        <button class="sbtn" style="width:auto;padding:0 24px;font-size:12px;opacity:.7;background:transparent;" onclick="showDiag()">Diagnostics</button>
+      </div>
+    </div>
+
+    <div class="sht">
+      <button class="sback">‹ Back</button>
+      <span class="stitle">Face Scan</span>
+      <div style="width:50px"></div>
+    </div>
+  </div>
+
+  <div class="sbot">
+    <div class="ssw">
+      <div class="ssm" id="ssm">Center your face in the frame</div>
+      <div class="sss" id="sss">KEEP STILL · NEUTRAL EXPRESSION</div>
+    </div>
+    <button class="sbtn" id="scanbtn" onclick="startScan()" disabled>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+      Begin Scan
+    </button>
+  </div>
+</div>
+
+<!-- ═══ ANALYZE SCREEN ═══ -->
+<div class="scr" id="s-analyze">
+  <div class="stage3d" id="stage-a">
+    <canvas class="stagecanvas" id="cva"></canvas>
+    <div class="vignet"></div>
+    <div class="mtag" id="t-sym" style="left:8px;top:195px;"><span class="dot" style="background:#00dfc4"></span><span id="tv-sym">Symmetry —</span></div>
+    <div class="mtag" id="t-eye" style="right:8px;top:190px;"><span class="dot" style="background:#00b8ff"></span><span id="tv-eye">Eye Gap —</span></div>
+    <div class="mtag" id="t-rat" style="left:8px;top:320px;"><span class="dot" style="background:#ffd580"></span><span id="tv-rat">Golden Ratio —</span></div>
+    <div class="mtag" id="t-jaw" style="right:8px;top:355px;"><span class="dot" style="background:#c084fc"></span><span id="tv-jaw">Jaw Angle —</span></div>
+    <div class="dragh" id="dragh"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M18 8L22 12L18 16M6 8L2 12L6 16M12 2L12 22"/></svg>Drag to rotate</div>
+  </div>
+  <div class="pp" id="ppa">
+    <div class="ph" onclick="tglP('ppa')"><div class="phb"></div></div>
+    <div class="pb">
+      <div class="pe">3D Analysis Report</div><div class="pt">Facial Feature Analysis</div>
+      <div class="ps" id="asub">468 landmarks · Depth-aware · Live computed</div>
+      <div class="mgrid">
+        <div class="mc"><div class="mcv" id="mc-s">—</div><div class="mcl">Symmetry</div><div class="mcb"><div class="mcbf" id="mb-s" style="width:0%"></div></div></div>
+        <div class="mc"><div class="mcv" id="mc-r">—</div><div class="mcl">φ Ratio</div><div class="mcb"><div class="mcbf" id="mb-r" style="width:0%"></div></div></div>
+        <div class="mc"><div class="mcv" id="mc-sh">—</div><div class="mcl">Face Shape</div><div class="mcb"><div class="mcbf" id="mb-sh" style="width:72%"></div></div></div>
+      </div>
+      <!-- Feature measurement grid -->
+      <div class="feat-grid">
+        <div class="fg-cell"><div class="fg-cell-lbl">Eye Gap</div><div class="fg-cell-val" id="fg-egap">—<span class="fg-cell-unit">mm</span></div></div>
+        <div class="fg-cell"><div class="fg-cell-lbl">L · R Eye</div><div class="fg-cell-val" id="fg-leye" style="font-size:11px">—</div></div>
+        <div class="fg-cell"><div class="fg-cell-lbl">Nose Width</div><div class="fg-cell-val" id="fg-nw">—<span class="fg-cell-unit">mm</span></div></div>
+        <div class="fg-cell"><div class="fg-cell-lbl">Mouth Width</div><div class="fg-cell-val" id="fg-mw">—<span class="fg-cell-unit">mm</span></div></div>
+        <div class="fg-cell"><div class="fg-cell-lbl">Jaw Angle</div><div class="fg-cell-val" id="fg-jaw">—<span class="fg-cell-unit">°</span></div></div>
+        <div class="fg-cell"><div class="fg-cell-lbl">Philtrum</div><div class="fg-cell-val" id="fg-nh">—<span class="fg-cell-unit">mm</span></div></div>
+        <div class="fg-cell"><div class="fg-cell-lbl">Temporal</div><div class="fg-cell-val" id="fg-temp">—</div></div>
+        <div class="fg-cell"><div class="fg-cell-lbl">5-Eye Rule</div><div class="fg-cell-val" id="fg-5eye">—<span class="fg-cell-unit">×</span></div></div>
+        <div class="fg-cell"><div class="fg-cell-lbl">Thirds</div><div class="fg-cell-val" id="fg-thirds" style="font-size:10px">—</div></div>
+        <div class="fg-cell"><div class="fg-cell-lbl">Face W×H</div><div class="fg-cell-val" id="fg-wh" style="font-size:10px">—</div></div>
+        <div class="fg-cell"><div class="fg-cell-lbl">Brow Δ</div><div class="fg-cell-val" id="fg-brow">Δ—<span class="fg-cell-unit">mm</span></div></div>
+        <div class="fg-cell"><div class="fg-cell-lbl">Lip Height</div><div class="fg-cell-val" id="fg-lip">—<span class="fg-cell-unit">mm</span></div></div>
+      </div>
+      <!-- AI Anatomical Report -->
+      <div style="margin-top:10px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <span style="font-family:var(--mono);font-size:8px;letter-spacing:2.5px;text-transform:uppercase;color:var(--txt3);">AI Anatomical Analysis</span>
+          <button id="ai-report-btn" onclick="generateAIReport()" style="padding:4px 11px;border-radius:8px;background:rgba(0,223,196,.09);border:1px solid var(--border2);color:var(--cyan);font-family:var(--mono);font-size:8px;letter-spacing:1px;cursor:pointer;transition:all .2s;">Generate</button>
+        </div>
+        <div id="ai-report-wrap" style="border-radius:12px;border:1px solid var(--border);overflow:hidden;background:rgba(255,255,255,.018);">
+          <div id="ai-report-placeholder" style="padding:14px;text-align:center;color:var(--txt3);font-size:11px;line-height:1.6;">
+            Tap <span style="color:var(--cyan)">Generate</span> for an AI anatomical breakdown of your facial proportions.
+          </div>
+          <div id="ai-report-loading" style="display:none;padding:18px 14px;text-align:center;">
+            <div style="display:flex;align-items:center;justify-content:center;gap:8px;color:var(--txt2);font-size:11px;font-family:var(--mono);">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="animation:spin2 1.2s linear infinite;"><path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0"/></svg>
+              Analyzing anatomy…
+            </div>
+          </div>
+          <div id="ai-report-content" style="display:none;padding:12px 14px;font-size:10.5px;color:var(--txt2);line-height:1.72;max-height:240px;overflow-y:auto;"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="navbar">
+    <div class="ni on" onclick="navTo('analyze',this)"><div class="niw"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="9" r="4"/><path d="M6 21c0-4 2.7-6 6-6s6 2 6 6"/></svg><div class="nd"></div></div><span class="nl">Analyze</span></div>
+    <div class="ni" onclick="navTo('style',this)"><div class="niw"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1z"/></svg><div class="nd"></div></div><span class="nl">Style</span></div>
+    <div class="ni" onclick="navTo('adjust',this)"><div class="niw"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M12 20V12M6 20V16M18 20V4"/><circle cx="12" cy="9" r="2"/><circle cx="6" cy="13" r="2"/><circle cx="18" cy="7" r="2"/></svg><div class="nd"></div></div><span class="nl">Adjust</span></div>
+    <div class="ni" onclick="navTo('camera',this)"><div class="niw"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg><div class="nd"></div></div><span class="nl">Camera</span></div>
+  </div>
+</div>
+
+<!-- ═══ STYLE SCREEN ═══ -->
+<div class="scr" id="s-style">
+  <div class="stage3d"><canvas class="stagecanvas" id="cvs"></canvas><div class="vignet"></div><div class="sbadge" id="sbdg">STYLE · NEURAL AURA</div></div>
+  <div class="pp" id="pps">
+    <div class="ph" onclick="tglP('pps')"><div class="phb"></div></div>
+    <div class="pb">
+      <div class="pe">3D Style Transfer</div><div class="pt">Transfer a Face Style</div>
+      <div class="ps">Map another person's facial style onto your 3D model</div>
+
+      <!-- Source template upload -->
+      <div class="st-source-row">
+        <div class="st-source-thumb" onclick="document.getElementById('st-file-input').click()">
+          <img id="st-thumb-img" alt=""/>
+          <span class="plus" id="st-thumb-plus">＋</span>
+        </div>
+        <div class="st-source-info">
+          <div class="st-source-title" id="st-source-name">No style source selected</div>
+          <div class="st-source-sub">Upload a photo to extract facial style</div>
+        </div>
+        <button class="st-upload-btn" onclick="document.getElementById('st-file-input').click()">Upload</button>
+        <input type="file" id="st-file-input" accept="image/*" onchange="onStyleUpload(this)"/>
+      </div>
+
+      <div class="ssw2">
+        <div class="sw on" onclick="setSt(this,'neural','NEURAL AURA','#00dfc4')"><div class="sw-bg sw-neural"></div><div class="sw-l">Neural Aura</div></div>
+        <div class="sw" onclick="setSt(this,'chrome','CHROME SOUL','#b8c8d8')"><div class="sw-bg sw-chrome"></div><div class="sw-l">Chrome Soul</div></div>
+        <div class="sw" onclick="setSt(this,'ember','EMBER CORE','#ff7040')"><div class="sw-bg sw-ember"></div><div class="sw-l">Ember Core</div></div>
+        <div class="sw" onclick="setSt(this,'bio','BIO SIGNAL','#3dffa0')"><div class="sw-bg sw-bio"></div><div class="sw-l">Bio Signal</div></div>
+        <div class="sw" onclick="setSt(this,'frost','FROST DEPTH','#80c8ff')"><div class="sw-bg sw-frost"></div><div class="sw-l">Frost Depth</div></div>
+        <div class="sw" onclick="setSt(this,'dusk','DUSK PRISM','#c084fc')"><div class="sw-bg sw-dusk"></div><div class="sw-l">Dusk Prism</div></div>
+      </div>
+      <div class="inrow"><span class="inlbl">Intensity</span><input type="range" class="insl" min="0" max="100" value="72" id="insl" oninput="onInt(this.value)"><span class="inv" id="inv">72%</span></div>
+      <div style="display:flex;gap:8px;"><button class="ab g" style="font-family:var(--sans)">Compare</button><button class="ab a" style="font-family:var(--sans)" onclick="toast('Style saved to profile')">Save Style</button></div>
+    </div>
+  </div>
+  <div class="navbar">
+    <div class="ni" onclick="navTo('analyze',this)"><div class="niw"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="9" r="4"/><path d="M6 21c0-4 2.7-6 6-6s6 2 6 6"/></svg><div class="nd"></div></div><span class="nl">Analyze</span></div>
+    <div class="ni on" onclick="navTo('style',this)"><div class="niw"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1z"/></svg><div class="nd"></div></div><span class="nl">Style</span></div>
+    <div class="ni" onclick="navTo('adjust',this)"><div class="niw"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M12 20V12M6 20V16M18 20V4"/><circle cx="12" cy="9" r="2"/><circle cx="6" cy="13" r="2"/><circle cx="18" cy="7" r="2"/></svg><div class="nd"></div></div><span class="nl">Adjust</span></div>
+    <div class="ni" onclick="navTo('camera',this)"><div class="niw"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg><div class="nd"></div></div><span class="nl">Camera</span></div>
+  </div>
+</div>
+
+<!-- ═══ ADJUST SCREEN ═══ -->
+<div class="scr" id="s-adjust">
+  <div class="stage3d"><canvas class="stagecanvas" id="cva2"></canvas><div class="vignet"></div><div class="livepill"><div class="livdot"></div><span class="livlbl">Live Reshape</span></div></div>
+  <div class="pp" id="ppd">
+    <div class="ph" onclick="tglP('ppd')"><div class="phb"></div></div>
+    <div class="pb">
+      <div class="pe">3D Facial Control</div><div class="pt">Parametric Adjust</div><div class="ps">Sliders initialized from your scan — adjust relative to your actual face</div>
+      <div class="agroups">
+        <div class="ag"><div class="agt">Geometry</div>
+          <div class="asl"><span class="asll">Face Width</span><input type="range" class="asli" min="-50" max="50" value="0" oninput="onA('width',+this.value)"><span class="aslv" id="v-width">0</span></div>
+          <div class="asl"><span class="asll">Jaw Curve</span><input type="range" class="asli" min="-50" max="50" value="0" oninput="onA('jaw',+this.value)"><span class="aslv" id="v-jaw">0</span></div>
+          <div class="asl"><span class="asll">Chin Length</span><input type="range" class="asli" min="-50" max="50" value="0" oninput="onA('chin',+this.value)"><span class="aslv" id="v-chin">0</span></div>
+        </div>
+        <div class="ag"><div class="agt">Features</div>
+          <div class="asl"><span class="asll">Nose Bridge</span><input type="range" class="asli" min="-50" max="50" value="0" oninput="onA('nose',+this.value)"><span class="aslv" id="v-nose">0</span></div>
+          <div class="asl"><span class="asll">Lip Volume</span><input type="range" class="asli" min="-50" max="50" value="0" oninput="onA('lip',+this.value)"><span class="aslv" id="v-lip">0</span></div>
+          <div class="asl"><span class="asll">Brow Arch</span><input type="range" class="asli" min="-50" max="50" value="0" oninput="onA('brow',+this.value)"><span class="aslv" id="v-brow">0</span></div>
+        </div>
+      </div>
+      <div class="abtns"><button class="ab g" onclick="resetA()">Reset</button><button class="ab g">Export 3D</button><button class="ab a" onclick="toast('Applied to personal model')">Apply</button></div>
+    </div>
+  </div>
+  <div class="navbar">
+    <div class="ni" onclick="navTo('analyze',this)"><div class="niw"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="9" r="4"/><path d="M6 21c0-4 2.7-6 6-6s6 2 6 6"/></svg><div class="nd"></div></div><span class="nl">Analyze</span></div>
+    <div class="ni" onclick="navTo('style',this)"><div class="niw"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1z"/></svg><div class="nd"></div></div><span class="nl">Style</span></div>
+    <div class="ni on" onclick="navTo('adjust',this)"><div class="niw"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M12 20V12M6 20V16M18 20V4"/><circle cx="12" cy="9" r="2"/><circle cx="6" cy="13" r="2"/><circle cx="18" cy="7" r="2"/></svg><div class="nd"></div></div><span class="nl">Adjust</span></div>
+    <div class="ni" onclick="navTo('camera',this)"><div class="niw"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg><div class="nd"></div></div><span class="nl">Camera</span></div>
+  </div>
+</div>
+
+<!-- ═══ CAMERA SCREEN ═══ -->
+<div class="scr" id="s-camera">
+  <div class="camstage">
+    <video id="camv" autoplay muted playsinline></video>
+    <canvas id="camo"></canvas>
+    <div class="camvig"></div>
+    <div class="facebox" id="fbox"></div>
+    <div class="camhud">
+      <div class="tfpill"><div class="tfd on"></div><span class="tfl">TRUEFACE™</span></div>
+      <div class="crd"><div class="cr b">PERSONAL MODEL</div><div class="cr">48MP · f/1.78</div><div class="cr" id="cam-pts">— pts</div></div>
+    </div>
+  </div>
+  <!-- Camera controls sit in normal flow, ABOVE the navbar -->
+  <div class="camctrl">
+    <div class="tfbar"><div><div class="tfbt">MIRRA-Trueface™</div><div class="tfbs" id="tfsub">Personal face model active</div></div><div class="tfbi"></div></div>
+    <!-- Mode chips ABOVE shutter so they don't overlap navbar -->
+    <div class="cchips" style="margin-bottom:12px;">
+      <div class="cc on" onclick="selCC(this,'Trueface')">Trueface</div>
+      <div class="cc" onclick="selCC(this,'Portrait+')">Portrait+</div>
+      <div class="cc" onclick="selCC(this,'3D Render')">3D Render</div>
+      <div class="cc" onclick="selCC(this,'Custom')">Custom</div>
+    </div>
+    <div class="shutrow">
+      <div class="sidebtn" onclick="flipCam()">↻</div>
+      <div class="shut" onclick="capturePhoto()"></div>
+      <div class="sidebtn">⊡</div>
+    </div>
+  </div>
+  <div class="photoprev" id="pprev"><canvas id="phcanv" width="260" height="340"></canvas>
+    <div class="ppbtns"><button class="ppbtn ppdisc" onclick="discP()">Retake</button><button class="ppbtn ppsave" onclick="saveP()">Save</button></div>
+  </div>
+  <div class="flash" id="flash"></div>
+  <div class="navbar">
+    <div class="ni" onclick="navTo('analyze',this)"><div class="niw"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="9" r="4"/><path d="M6 21c0-4 2.7-6 6-6s6 2 6 6"/></svg><div class="nd"></div></div><span class="nl">Analyze</span></div>
+    <div class="ni" onclick="navTo('style',this)"><div class="niw"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1z"/></svg><div class="nd"></div></div><span class="nl">Style</span></div>
+    <div class="ni" onclick="navTo('adjust',this)"><div class="niw"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M12 20V12M6 20V16M18 20V4"/><circle cx="12" cy="9" r="2"/><circle cx="6" cy="13" r="2"/><circle cx="18" cy="7" r="2"/></svg><div class="nd"></div></div><span class="nl">Adjust</span></div>
+    <div class="ni on" onclick="navTo('camera',this)"><div class="niw"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg><div class="nd"></div></div><span class="nl">Camera</span></div>
+  </div>
+</div>
+
+</div></div>
+
+<script>
+'use strict';
+// ═══ STATE ═══
+const G={
+  cur:'s-scan', metrics:null, lms:null,
+  scanStream:null, camStream:null, facing:'user',
+  aR:null,aS:null,aC:null,aObjs:null,
+  sR:null,sS:null,sC:null,sObjs:null,
+  dR:null,dS:null,dC:null,dObjs:null,
+  aRot:{x:.1,y:0}, sRot:{x:.1,y:0}, dRot:{x:.1,y:0},
+  autoY:0, autoDone:false, userDragged:false,
+  adjP:{width:0,jaw:0,chin:0,nose:0,lip:0,brow:0},
+  styleKey:'neural', stInt:.72,
+  camMp:null, camMpCam:null, camActive:false,
+  scanMp:null, scanMpCam:null,
+  latestLms:null, scanFrames:[], faceQ:0,
+  scanRunning:false,
+};
+
+// clock
+(function(){ const e=document.getElementById('sbt'); function t(){ const n=new Date(); e.textContent=n.getHours()+':'+String(n.getMinutes()).padStart(2,'0'); } t(); setInterval(t,1000); })();
+
+// ═══ SCREEN ═══
+function goTo(id){ document.getElementById(G.cur).classList.remove('on'); document.getElementById(id).classList.add('on'); G.cur=id; }
+
+function navTo(key,el){
+  el.closest('.navbar').querySelectorAll('.ni').forEach(n=>n.classList.remove('on')); el.classList.add('on');
+  const m={analyze:'s-analyze',style:'s-style',adjust:'s-adjust',camera:'s-camera'};
+  goTo(m[key]);
+  if(key==='analyze'){ ensureA(); setTimeout(()=>opnP('ppa'),350); }
+  if(key==='style')  { ensureS(); setTimeout(()=>opnP('pps'),350); }
+  if(key==='adjust') { ensureD(); setTimeout(()=>opnP('ppd'),350); }
+  if(key==='camera') { initCam(); }
+}
+function tglP(id){ document.getElementById(id).classList.toggle('open'); }
+function opnP(id){ document.getElementById(id).classList.add('open'); }
+
+function toast(msg){ const o=document.querySelector('.toast'); if(o)o.remove(); const t=document.createElement('div'); t.className='toast'; t.textContent=msg; document.getElementById('phone').appendChild(t); setTimeout(()=>t.remove(),3100); }
+
+// ═══ MEDIAPIPE ═══
+function startMP(videoEl, onRes, opts={}){
+  const mp=new FaceMesh({ locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}` });
+  mp.setOptions({ maxNumFaces:1, refineLandmarks:true, minDetectionConfidence:.5, minTrackingConfidence:.5, ...opts });
+  mp.onResults(onRes);
+  const cam=new Camera(videoEl,{ onFrame:async()=>{ try{ await mp.send({image:videoEl}); }catch(e){} }, width:640, height:480 });
+  cam.start();
+  return {mp,cam};
+}
+
+// ═══ SCAN ═══
+async function initScan(){
+  const v=document.getElementById('sv');
+  const err=document.getElementById('cerr');
+  err.classList.remove('show');
+
+  // Protocol check
+  const proto=location.protocol;
+  const isSecure = proto==='https:' || location.hostname==='localhost' || location.hostname==='127.0.0.1';
+  if(!isSecure){
+    err.classList.add('show');
+    const t=document.getElementById('cerr-title'); if(t) t.textContent='HTTPS Required';
+    const m=document.getElementById('cerr-msg'); if(m) m.innerHTML='Camera requires a secure connection.<br>Open this page via <strong>https://</strong> or localhost.';
+    const d=document.getElementById('cerr-detail'); if(d){ d.style.display='block'; d.textContent='Current: '+proto+'//'+location.hostname; }
+    document.getElementById('scanbtn').disabled=true;
+    return;
+  }
+
+  // getUserMedia availability check
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
+    err.classList.add('show');
+    const t=document.getElementById('cerr-title'); if(t) t.textContent='Browser Not Supported';
+    const m=document.getElementById('cerr-msg'); if(m) m.innerHTML='Camera API unavailable.<br>Try Safari 14+, Chrome 76+, or Firefox 103+.';
+    document.getElementById('scanbtn').disabled=true;
+    return;
+  }
+
+  try{
+    const s=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:640},height:{ideal:480}},audio:false});
+    G.scanStream=s; v.srcObject=s; await v.play();
+    const ov=document.getElementById('so'); const wr=document.getElementById('swrap');
+    ov.width=wr.clientWidth; ov.height=wr.clientHeight;
+    document.getElementById('qbw').classList.add('show');
+    const {mp,cam}=startMP(v,onScanRes);
+    G.scanMp=mp; G.scanMpCam=cam;
+  } catch(e){
+    err.classList.add('show');
+    document.getElementById('scanbtn').disabled=true;
+    const d=document.getElementById('cerr-detail'); if(d){ d.style.display='block'; d.textContent='Error: '+e.name+' — '+e.message; }
+    const m=document.getElementById('cerr-msg');
+    if(m){
+      if(e.name==='NotAllowedError')      m.innerHTML='Camera permission denied.<br>Go to browser Settings → Site → Camera → Allow.';
+      else if(e.name==='NotFoundError')   m.innerHTML='No camera found on this device.';
+      else if(e.name==='NotReadableError')m.innerHTML='Camera is in use by another app.<br>Close other apps and try again.';
+      else if(e.name==='OverconstrainedError') m.innerHTML='Camera constraints not met.<br>Retrying with relaxed settings…';
+      else m.innerHTML='Camera error. Check browser permissions and try again.';
+    }
+    // Retry with minimal constraints for OverconstrainedError
+    if(e.name==='OverconstrainedError'){
+      try{
+        const s2=await navigator.mediaDevices.getUserMedia({video:true,audio:false});
+        G.scanStream=s2; v.srcObject=s2; await v.play();
+        err.classList.remove('show');
+        const ov=document.getElementById('so'); const wr=document.getElementById('swrap');
+        ov.width=wr.clientWidth; ov.height=wr.clientHeight;
+        document.getElementById('qbw').classList.add('show');
+        const {mp,cam}=startMP(v,onScanRes);
+        G.scanMp=mp; G.scanMpCam=cam;
+      } catch(e2){ /* show original error */ }
+    }
+  }
+}
+
+function showDiag(){
+  const d=document.getElementById('cerr-detail'); if(!d)return;
+  d.style.display='block';
+  const checks=[
+    'Protocol: '+location.protocol,
+    'Host: '+location.hostname,
+    'mediaDevices: '+(navigator.mediaDevices?'YES':'NO'),
+    'getUserMedia: '+(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia?'YES':'NO'),
+    'UA: '+navigator.userAgent.slice(0,60),
+  ];
+  d.textContent=checks.join(' | ');
+}
+
+function onScanRes(res){
+  const ov=document.getElementById('so'); const ctx=ov.getContext('2d');
+  const W=ov.width,H=ov.height; ctx.clearRect(0,0,W,H);
+  if(!res.multiFaceLandmarks||!res.multiFaceLandmarks.length){ G.faceQ=Math.max(0,G.faceQ-4); updQ(); return; }
+  const lms=res.multiFaceLandmarks[0]; G.latestLms=lms;
+  const nt=lms[4]; const dist=Math.sqrt((nt.x-.5)**2+(nt.y-.46)**2);
+  G.faceQ=Math.min(100,Math.max(0,100-dist*310)); updQ();
+  drawScanLms(ctx,lms,W,H);
+  if(G.scanRunning) G.scanFrames.push(lms);
+  // Enable button once face is first detected
+  const btn=document.getElementById('scanbtn');
+  if(btn&&btn.disabled&&!G.scanRunning) btn.disabled=false;
+}
+
+function updQ(){ const q=G.faceQ; document.getElementById('qbf').style.width=q+'%'; document.getElementById('qbv').textContent=Math.round(q)+'%'; }
+
+const TESS_OUTER=[10,338,297,332,284,251,389,356,454,323,361,288,397,365,379,378,400,377,152,148,176,149,150,136,172,58,132,93,234,127,162,21,54,103,67,109,10];
+const TESS_LE=[33,7,163,144,145,153,154,155,133,173,157,158,159,160,161,246,33];
+const TESS_RE=[362,382,381,380,374,373,390,249,263,466,388,387,386,385,384,398,362];
+const TESS_LIPS=[61,146,91,181,84,17,314,405,321,375,291,409,270,269,267,0,37,39,40,185,61];
+const KEY_IDS=[4,1,33,263,61,291,152,10,234,454,362,133,70,300,105,334,13,14,473,468];
+
+function drawScanLms(ctx,lms,W,H){
+  ctx.save(); ctx.translate(W,0); ctx.scale(-1,1);
+  [[TESS_OUTER,'rgba(0,223,196,0.22)'],[TESS_LE,'rgba(0,184,255,0.28)'],[TESS_RE,'rgba(0,184,255,0.28)'],[TESS_LIPS,'rgba(0,223,196,0.2)']].forEach(([g,col])=>{
+    ctx.beginPath(); g.forEach((i,k)=>{ const l=lms[i]; k===0?ctx.moveTo(l.x*W,l.y*H):ctx.lineTo(l.x*W,l.y*H); });
+    ctx.strokeStyle=col; ctx.lineWidth=.85; ctx.stroke();
+  });
+  lms.forEach((l,i)=>{
+    const key=KEY_IDS.includes(i); ctx.beginPath(); ctx.arc(l.x*W,l.y*H,key?2.8:1.1,0,Math.PI*2);
+    ctx.fillStyle=key?'rgba(0,223,196,.95)':'rgba(0,184,255,.4)'; ctx.fill();
+    if(key){ ctx.beginPath(); ctx.arc(l.x*W,l.y*H,7,0,Math.PI*2); ctx.fillStyle='rgba(0,223,196,.06)'; ctx.fill(); }
+  });
+  ctx.restore();
+}
+
+function avgLms(frames){ if(!frames.length)return G.latestLms; const n=frames[0].length; return Array.from({length:n},(_,i)=>{ let sx=0,sy=0,sz=0; frames.forEach(f=>{sx+=f[i].x;sy+=f[i].y;sz+=f[i].z||0;}); return{x:sx/frames.length,y:sy/frames.length,z:sz/frames.length}; }); }
+
+function startScan(){
+  if(G.scanRunning||!G.latestLms){ if(!G.latestLms)toast('Align your face first'); return; }
+  G.scanRunning=true; G.scanFrames=[];
+  document.getElementById('scanbtn').disabled=true;
+
+  const sm=document.getElementById('ssm'), ss=document.getElementById('sss');
+  const steps=[
+    {id:null,   msg:'Hold still — capturing front view…', sub:'FRONTAL SCAN · 468 LANDMARKS'},
+    {id:'ht-left',  msg:'Now turn your head LEFT slowly', sub:'PROFILE CAPTURE · DEPTH MAPPING'},
+    {id:'ht-right', msg:'Turn your head RIGHT slowly',    sub:'PROFILE CAPTURE · DEPTH MAPPING'},
+    {id:'ht-up',    msg:'Tilt your chin UP slightly',     sub:'VERTICAL DEPTH · BROW & FOREHEAD'},
+    {id:'ht-down',  msg:'Tilt your chin DOWN slightly',   sub:'UNDER-CHIN · JAW MAPPING'},
+  ];
+  const STEP_DUR=1600; // ms per step
+  let stepIdx=0;
+
+  function showStep(i){
+    // Hide all arrows
+    ['ht-left','ht-right','ht-up','ht-down'].forEach(id=>{ document.getElementById(id).style.opacity='0'; });
+    if(steps[i].id) document.getElementById(steps[i].id).style.opacity='1';
+    sm.textContent=steps[i].msg; ss.textContent=steps[i].sub;
+    // Update step dots
+    for(let d=0;d<4;d++){
+      const el=document.getElementById('sstep-'+d);
+      if(el){ el.className='sstep'+(d<i?' done':d===i?' active':''); }
+    }
+  }
+
+  showStep(0);
+  const stepTimer=setInterval(()=>{
+    stepIdx++;
+    if(stepIdx<steps.length){
+      showStep(stepIdx);
+    } else {
+      clearInterval(stepTimer);
+      // Collect final frames briefly then finish
+      setTimeout(finishScan, 400);
+    }
+  }, STEP_DUR);
+
+  // Also accumulate frames throughout
+  // (frames already collected via onScanRes while G.scanRunning=true)
+
+  function finishScan(){
+    ['ht-left','ht-right','ht-up','ht-down'].forEach(id=>{ document.getElementById(id).style.opacity='0'; });
+    document.getElementById('scan-check').style.opacity='1';
+    sm.textContent='Scan complete'; ss.textContent='BUILDING YOUR 3D MODEL…';
+    // Step 4 done
+    for(let d=0;d<4;d++){ const el=document.getElementById('sstep-'+d); if(el)el.className='sstep done'; }
+
+    G.scanRunning=false;
+    const avg=avgLms(G.scanFrames.length>0?G.scanFrames:[G.latestLms]);
+    G.lms=avg; G.metrics=computeMetrics(avg);
+    if(G.scanStream){ G.scanStream.getTracks().forEach(t=>t.stop()); G.scanStream=null; }
+    if(G.scanMpCam){ G.scanMpCam.stop(); }
+
+    setTimeout(()=>{ toast('3D model built · 468 landmarks locked'); }, 200);
+    setTimeout(()=>{ goTo('s-analyze'); setTimeout(()=>{ ensureA(); opnP('ppa'); },80); }, 900);
+  }
+}
+
+// ═══ METRICS ═══
+function computeMetrics(lms){
+  function p(i){ return lms[Math.min(i,lms.length-1)]||{x:.5,y:.5,z:0}; }
+  function dxy(a,b){ return Math.sqrt((a.x-b.x)**2+(a.y-b.y)**2); }
+  // Eyes
+  const leW=dxy(p(33),p(133)),reW=dxy(p(362),p(263)),egap=dxy(p(133),p(362)),eAvg=(leW+reW)/2;
+  const leH=dxy(p(159),p(145)),reH=dxy(p(386),p(374));
+  // Brows
+  const lbH=p(55).y-p(159).y, rbH=p(285).y-p(386).y, browA=Math.abs(lbH-rbH);
+  // Nose
+  const nW=dxy(p(129),p(358)),nH=dxy(p(4),p(2));
+  // Mouth
+  const mW=dxy(p(61),p(291)),mH=dxy(p(13),p(14));
+  // Face
+  const fW=dxy(p(116),p(345)),fH=dxy(p(10),p(152));
+  // Symmetry
+  const pairs=[[dxy(p(33),p(4)),dxy(p(263),p(4))],[dxy(p(61),p(4)),dxy(p(291),p(4))],[dxy(p(116),p(4)),dxy(p(345),p(4))],[leW,reW],[leH,reH]];
+  let sym=0; pairs.forEach(([a,b])=>{ sym+=Math.max(0,1-Math.abs(a-b)/((a+b)/2+.001)*8); }); sym=sym/pairs.length*100;
+  // Golden ratio
+  const gr=fH/(fW+.001), gDiff=Math.abs(gr-1.618), gScore=Math.max(0,1-gDiff/1.618)*100;
+  // Face shape
+  const wh=fW/(fH+.001); const sh=wh>.85?'Round':wh>.75?'Square':wh>.65?'Oval':'Oblong';
+  // Eye set
+  const er=egap/(eAvg+.001); const es=er<1.8?'Close-set':er>2.4?'Wide-set':'Standard';
+  // Scale: avg eye width ≈ 32mm
+  const sc=32/(eAvg+.001);
+  // Jaw angle
+  const jl={x:p(152).x-p(172).x,y:p(152).y-p(172).y}, jr={x:p(152).x-p(397).x,y:p(152).y-p(397).y};
+  const jdot=jl.x*jr.x+jl.y*jr.y, jmag=Math.sqrt(jl.x**2+jl.y**2)*Math.sqrt(jr.x**2+jr.y**2)+.001;
+  const jawAng=Math.round(Math.acos(Math.min(1,Math.max(-1,jdot/jmag)))*180/Math.PI);
+  // ── Extra anatomical landmarks ──────────────────────────────
+  // Philtrum length (nose base → cupid's bow center)
+  const philtrumH = dxy(p(2), p(0));
+  // Upper to lower face thirds (neoclassical thirds rule):
+  // Top third: hairline→brow (approximated as forehead→brow)
+  // Middle third: brow→nose base
+  // Lower third: nose base→chin
+  const t1 = dxy(p(10), p(55));   // hairline area → brow inner (top third proxy)
+  const t2 = dxy(p(55), p(2));    // brow inner → nose base (middle third)
+  const t3 = dxy(p(2), p(152));   // nose base → chin (lower third)
+  const thirds_balance = Math.min(t1,t2,t3)/Math.max(t1,t2,t3+0.001)*100;
+  // Five-eyes rule: face width should equal ~5 eye widths
+  // Face width / eye width should be ≈ 5
+  const fiveEyesRatio = fW / (eAvg + 0.001);
+  // Temporal hollowing index: lateral temple width vs cheekbone width
+  // Landmark 234 = L temporal, 454 = R temporal, 116 = L cheek, 345 = R cheek
+  const templeW = dxy(p(234), p(454));
+  const cheekW  = dxy(p(116), p(345));
+  const temporalIdx = templeW / (cheekW + 0.001); // <0.85 = hollow temporal
+  // Intercanthal vs nasal base: nose width / eye gap (ideal ≈ 1.0)
+  const noseEyeRatio = nW / (egap + 0.001);
+  // Mouth width vs eye gap (ideal ≈ 1.5)
+  const mouthEyeRatio = mW / (egap + 0.001);
+  // Lip height (upper to lower)
+  const lipH = dxy(p(13), p(14));
+  // Chin prominence (approximated from chin to jaw plane)
+  const chinProm = dxy(p(152), p(175));
+  // Mandible width vs cheek width
+  const mandibW = dxy(p(172), p(397));
+  const mandibRatio = mandibW / (cheekW + 0.001);
+  // Nose tip projection (nose tip z-depth relative to face) – already in nH via MediaPipe z
+  // We use relative values from lms z for tip vs side face
+  const noseTipZ = -(lms[4].z || 0);
+  const templeZ  = -(lms[234].z || 0);
+  const noseProjection = Math.max(0, Math.min(100, 50 + noseTipZ * 400));
+
+  return {
+    sym, gScore, gr:+gr.toFixed(3), sh, es,
+    egMM:Math.round(egap*sc), fWmm:Math.round(fW*sc), fHmm:Math.round(fH*sc),
+    nWmm:Math.round(nW*sc), mWmm:Math.round(mW*sc),
+    leW:+(leW*sc).toFixed(1), reW:+(reW*sc).toFixed(1),
+    browAmm:+(browA*sc).toFixed(2), jawAng,
+    // Extended anatomy
+    philtrumMM: +(philtrumH*sc).toFixed(1),
+    thirds_balance: +thirds_balance.toFixed(1),
+    t1mm: +(t1*sc).toFixed(1), t2mm: +(t2*sc).toFixed(1), t3mm: +(t3*sc).toFixed(1),
+    fiveEyesRatio: +fiveEyesRatio.toFixed(2),
+    temporalIdx: +temporalIdx.toFixed(3),
+    noseEyeRatio: +noseEyeRatio.toFixed(2),
+    mouthEyeRatio: +mouthEyeRatio.toFixed(2),
+    lipHmm: +(lipH*sc).toFixed(1),
+    chinPromMM: +(chinProm*sc).toFixed(1),
+    mandibRatio: +mandibRatio.toFixed(2),
+    noseProjection: +noseProjection.toFixed(0),
+    // Derived slider init values (mapped from real data for adjust screen)
+    _sliderWidth: Math.round(Math.max(-50, Math.min(50, (fiveEyesRatio - 4.8) * 20))),
+    _sliderJaw:   Math.round(Math.max(-50, Math.min(50, (mandibRatio - 0.75) * 100))),
+    _sliderChin:  Math.round(Math.max(-50, Math.min(50, (t3mm - t2mm) * 1.5))),
+    _sliderNose:  Math.round(Math.max(-50, Math.min(50, (noseProjection - 50) * 0.8))),
+    _sliderLip:   Math.round(Math.max(-50, Math.min(50, (lipHmm - 18) * 4))),
+    _sliderBrow:  Math.round(Math.max(-50, Math.min(50, browAmm * -8))),
+  };
+}
+
+function fillMetrics(m){
+  if(!m)return;
+  // Floating tags
+  document.getElementById('tv-sym').textContent=`Symmetry ${m.sym.toFixed(1)}%`;
+  document.getElementById('tv-eye').textContent=`Eye Gap ${m.egMM}mm`;
+  document.getElementById('tv-rat').textContent=`φ Ratio ${m.gr}`;
+  document.getElementById('tv-jaw').textContent=`Jaw ${m.jawAng}°`;
+  // Metric cards
+  document.getElementById('mc-s').textContent=m.sym.toFixed(1)+'%';
+  document.getElementById('mc-r').textContent=m.gr;
+  document.getElementById('mc-sh').textContent=m.sh;
+  document.getElementById('mb-s').style.width=m.sym.toFixed(1)+'%';
+  document.getElementById('mb-r').style.width=m.gScore.toFixed(1)+'%';
+  // Feature measurement grid
+  function fv(id,val){ const e=document.getElementById(id); if(e)e.innerHTML=val; }
+  fv('fg-egap', m.egMM+'<span class="fg-cell-unit">mm</span>');
+  fv('fg-leye', m.leW+' · '+m.reW+'<span class="fg-cell-unit">mm</span>');
+  fv('fg-nw',   m.nWmm+'<span class="fg-cell-unit">mm</span>');
+  fv('fg-mw',   m.mWmm+'<span class="fg-cell-unit">mm</span>');
+  fv('fg-jaw',  m.jawAng+'<span class="fg-cell-unit">°</span>');
+  fv('fg-nh',   (m.philtrumMM||'—')+'<span class="fg-cell-unit">mm</span>');
+  const tIdx=m.temporalIdx||0; fv('fg-temp', tIdx<0.75?'<span style="color:#ffd580">Hollow</span>':tIdx<0.85?'Moderate':'Full');
+  fv('fg-5eye', (m.fiveEyesRatio||'—')+'<span class="fg-cell-unit">×</span>');
+  fv('fg-thirds',(m.t1mm||'—')+'·'+(m.t2mm||'—')+'·'+(m.t3mm||'—')+'<span class="fg-cell-unit">mm</span>');
+  fv('fg-wh',   m.fWmm+'×'+m.fHmm+'<span class="fg-cell-unit">mm</span>');
+  fv('fg-brow', 'Δ'+m.browAmm+'<span class="fg-cell-unit">mm</span>');
+  fv('fg-lip',  (m.lipHmm||'—')+'<span class="fg-cell-unit">mm</span>');
+  document.getElementById('asub').textContent=`468 landmarks · ${m.es} eye set · ${m.sh} face`;
+  // Seed adjust sliders from real scan data
+  if(m._sliderWidth!==undefined){
+    const sk={width:m._sliderWidth,jaw:m._sliderJaw,chin:m._sliderChin,nose:m._sliderNose,lip:m._sliderLip,brow:m._sliderBrow};
+    Object.entries(sk).forEach(([k,v])=>{
+      G.adjP[k]=v;
+      const sl=document.querySelector('[oninput*=\''+k+'\']'); if(sl)sl.value=v;
+      const ve=document.getElementById('v-'+k); if(ve)ve.textContent=v>0?'+'+v:String(v);
+    });
+  }
+  // Tags animate in
+  [['t-sym',200],['t-eye',380],['t-rat',560],['t-jaw',720]].forEach(([id,d])=>setTimeout(()=>document.getElementById(id).classList.add('show'),d));
+}
+// ═══ AI REPORT ═══
+async function generateAIReport(){
+  var m = G.metrics;
+  if(!m){ toast('Scan first to generate report'); return; }
+  var btn = document.getElementById('ai-report-btn');
+  var ph  = document.getElementById('ai-report-placeholder');
+  var ld  = document.getElementById('ai-report-loading');
+  var ct  = document.getElementById('ai-report-content');
+  ph.style.display = 'none';
+  ld.style.display = 'block';
+  ct.style.display = 'none';
+  if(btn){ btn.disabled = true; btn.textContent = 'Analyzing\u2026'; }
+
+  var dims    = m.fWmm + 'mm \xd7 ' + m.fHmm + 'mm';
+  var ratio   = (m.fWmm / (m.fHmm || 1)).toFixed(2);
+  var symStr  = m.sym.toFixed(1) + '%';
+  var thirdsStr = (m.t1mm||'?') + 'mm / ' + (m.t2mm||'?') + 'mm / ' + (m.t3mm||'?') + 'mm';
+
+  var promptText = [
+    'You are a facial anatomy expert providing an objective, non-medical assessment based on classic anatomical principles.',
+    'Analyze these precise measurements. Do NOT suggest procedures. Be specific, analytical, educational.',
+    '',
+    'Measurements from 468-point MediaPipe scan:',
+    '- Face shape: ' + m.sh + ' (W/H ratio: ' + ratio + ')',
+    '- Face dimensions: ' + dims,
+    '- Symmetry: ' + symStr,
+    '- Golden ratio H/W: ' + m.gr + ' (ideal 1.618)',
+    '- Neoclassical thirds (upper/mid/lower): ' + thirdsStr,
+    '- Five-eyes ratio: ' + (m.fiveEyesRatio||'?') + ' (ideal 5.0)',
+    '- Eye gap (intercanthal): ' + m.egMM + 'mm, type: ' + m.es,
+    '- Left eye: ' + m.leW + 'mm, Right eye: ' + m.reW + 'mm',
+    '- Nose width: ' + m.nWmm + 'mm, nose-eye ratio: ' + (m.noseEyeRatio||'?') + ' (ideal 1.0)',
+    '- Mouth width: ' + m.mWmm + 'mm, mouth-eye ratio: ' + (m.mouthEyeRatio||'?') + ' (ideal 1.5)',
+    '- Lip height: ' + (m.lipHmm||'?') + 'mm',
+    '- Philtrum length: ' + (m.philtrumMM||'?') + 'mm',
+    '- Jaw angle: ' + m.jawAng + '\u00b0 (norm 115-130)',
+    '- Mandible/cheek ratio: ' + (m.mandibRatio||'?') + ' (norm ~0.75)',
+    '- Temporal fullness index: ' + (m.temporalIdx||'?') + ' (>0.85=full, <0.75=hollow)',
+    '- Brow asymmetry: delta ' + m.browAmm + 'mm',
+    '- Nose projection index: ' + (m.noseProjection||'?') + '/100',
+    '',
+    'Write exactly 5 sections with these exact headings (plain text, no markdown symbols):',
+    '1. OVERALL PROPORTIONS',
+    '2. EYE REGION & PERIORBITAL STRUCTURE',
+    '3. NASAL & MIDFACE ANATOMY',
+    '4. LOWER FACE, MANDIBLE & CHIN',
+    '5. SYMMETRY & STRUCTURAL BALANCE',
+    '',
+    'Each section: 2-3 precise factual sentences referencing specific numbers. No procedure suggestions.'
+  ].join('\n');
+
+  try{
+    var resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1000,
+        messages: [{ role: 'user', content: promptText }]
+      })
+    });
+    var data = await resp.json();
+    var text = (data.content || []).map(function(b){ return b.text || ''; }).join('');
+    ld.style.display = 'none';
+
+    if(text){
+      var titles = [
+        'OVERALL PROPORTIONS',
+        'EYE REGION & PERIORBITAL STRUCTURE',
+        'NASAL & MIDFACE ANATOMY',
+        'LOWER FACE, MANDIBLE & CHIN',
+        'SYMMETRY & STRUCTURAL BALANCE'
+      ];
+      // Split by numbered headings
+      var parts = text.split(/\d+\.\s+/);
+      var html = '';
+      titles.forEach(function(t, i){
+        var raw = (parts[i+1] || '').trim();
+        // Strip the title itself if it appears at start
+        var body = raw.replace(new RegExp('^' + t + '[^\n]*\n?', 'i'), '').trim();
+        if(!body) body = raw;
+        body = body.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+        html += '<div class="ai-sec">'
+              + '<div class="ai-sec-t">' + t + '</div>'
+              + '<div style="font-size:10.5px;color:var(--txt2);line-height:1.72;">' + body + '</div>'
+              + '</div>';
+      });
+      ct.innerHTML = html || '<div style="color:var(--txt2);font-size:10.5px;">' + text + '</div>';
+      ct.style.display = 'block';
+    } else {
+      ct.innerHTML = '<div style="color:var(--txt3);font-size:11px;">No response — check API connection.</div>';
+      ct.style.display = 'block';
+    }
+  } catch(err){
+    ld.style.display = 'none';
+    ct.innerHTML = '<div style="color:var(--txt3);font-size:11px;">Network error: ' + err.message + '</div>';
+    ct.style.display = 'block';
+  }
+  if(btn){ btn.disabled = false; btn.textContent = 'Regenerate'; }
+}
+
+// ═══ THREE.JS ═══
+// Build parametric face geometry.
+// p = slider deltas (user adjustments on top of base).
+// base = landmark-derived shape (from computeMetrics, applied once on scan).
+function buildGeo(p={}, base={}){
+  // ── Base shape from real landmarks ──
+  // fiveEyesRatio: ideal 4.8–5.2 → maps to width scale
+  const fER   = base.fiveEyesRatio || 5.0;
+  const mandR = base.mandibRatio   || 0.75;
+  const t3b   = base.t3mm          || 60;
+  const t2b   = base.t2mm          || 60;
+  const nProj = base.noseProjection!==undefined ? base.noseProjection : 50;
+  const lipHb = base.lipHmm        || 18;
+  const browAb= base.browAmm       || 0;
+  const tmpIdx= base.temporalIdx   || 0.9;
+
+  // Convert base anatomy → shape scale factors (clamped, subtle)
+  const baseWidthS  = Math.max(0.82, Math.min(1.18, fER / 5.0));
+  const baseJawS    = Math.max(0.80, Math.min(1.20, mandR / 0.75));
+  const baseChinE   = Math.max(-0.25, Math.min(0.25, (t3b - t2b) / 80));
+  const baseNoseH   = Math.max(-0.3, Math.min(0.5,  (nProj - 50) / 100));
+  const baseLipV    = Math.max(-0.2, Math.min(0.6,  (lipHb - 18) / 20));
+  const baseBrowH   = Math.max(-0.3, Math.min(0.3,  -browAb / 5));
+  const baseTempD   = Math.max(0, Math.min(0.12,    (0.9 - tmpIdx) * 0.5)); // temporal hollow
+
+  // Slider deltas on top
+  const wS = baseWidthS  + (p.width||0)/200;
+  const jS = baseJawS    + (p.jaw  ||0)/300;
+  const cE = baseChinE   + (p.chin ||0)/80;
+  const nH = baseNoseH   + (p.nose ||0)/80;
+  const lV = baseLipV    + (p.lip  ||0)/80;
+  const bH = baseBrowH   + (p.brow ||0)/80;
+
+  const R=48, C=48;
+  const pos=[], idx=[], uv=[];
+
+  // Width profile: forehead taper, cheekbone, jaw
+  function fw(t){
+    if(t<.08) return .82*wS*(t/.08);
+    if(t<.32) return .82*wS*(.88+.12*Math.sin((t-.08)/.24*Math.PI)); // forehead
+    if(t<.48) return .82*wS*jS;                                        // jaw
+    return .82*wS*jS*(1-(t-.48)/.58);                                  // chin taper
+  }
+
+  // Depth profile: nose, eyes, lips, cheekbones, temporal hollow
+  function fz(u,v){
+    const nx=u, ny=1-v*2;
+    let d = .28*Math.sqrt(Math.max(0,1-nx*nx)); // base spherical
+
+    // Nose tip projection
+    const nd=Math.sqrt(nx*nx+(ny-.04)*(ny-.04));
+    if(nd<.22) d+=.16*(1-nd/.22)*(.25+nH*.5);
+
+    // Eye sockets (slight concavity)
+    const le=Math.sqrt((nx+.27)*(nx+.27)+(ny-.22)*(ny-.22));
+    const re=Math.sqrt((nx-.27)*(nx-.27)+(ny-.22)*(ny-.22));
+    if(le<.16) d-=.035*(1-le/.16);
+    if(re<.16) d-=.035*(1-re/.16);
+
+    // Lip volume
+    const ld=Math.sqrt(nx*nx+(ny+.30)*(ny+.30));
+    if(ld<.16) d+=.07*(1-ld/.16)*Math.max(.2,lV+.5);
+
+    // Cheekbones
+    const lc=Math.sqrt((nx+.34)*(nx+.34)+(ny-.04)*(ny-.04));
+    const rc=Math.sqrt((nx-.34)*(nx-.34)+(ny-.04)*(ny-.04));
+    if(lc<.22) d+=.04*(1-lc/.22);
+    if(rc<.22) d+=.04*(1-rc/.22);
+
+    // Temporal hollow: lateral upper face concavity
+    const lt=Math.sqrt((nx+.52)*(nx+.52)+(ny-.38)*(ny-.38));
+    const rt=Math.sqrt((nx-.52)*(nx-.52)+(ny-.38)*(ny-.38));
+    if(lt<.18) d-=baseTempD*(1-lt/.18);
+    if(rt<.18) d-=baseTempD*(1-rt/.18);
+
+    return d;
+  }
+
+  const grid=[];
+  for(let r=0;r<=R;r++){
+    const vt=r/R, vy=1.1*(1-vt*2), fw_=fw(vt), row=[];
+    for(let col=0;col<=C;col++){
+      const ut=(col/C)*2-1, vx=ut*fw_, vz=fz(ut,vt);
+      const cy2 = vt>.86 ? -(vt-.86)*cE*.9 : 0;
+      const bw  = vt<.22&&Math.abs(ut)>.15&&Math.abs(ut)<.55 ? ((.22-vt)*bH*.25) : 0;
+      pos.push(vx, vy+cy2+bw, vz);
+      uv.push(col/C, r/R);
+      row.push(pos.length/3-1);
+    }
+    grid.push(row);
+  }
+  for(let r=0;r<R;r++) for(let col=0;col<C;col++){
+    const a=grid[r][col],b=grid[r][col+1],cc=grid[r+1][col],d=grid[r+1][col+1];
+    idx.push(a,b,cc,b,d,cc);
+  }
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.BufferAttribute(new Float32Array(pos),3));
+  g.setAttribute('uv',new THREE.BufferAttribute(new Float32Array(uv),2));
+  g.setIndex(idx); g.computeVertexNormals(); return g;
+}
+
+function mkScene(cvid,li=1.5){
+  const canvas=document.getElementById(cvid),par=canvas.parentElement,W=par.clientWidth,H=par.clientHeight;
+  const R=new THREE.WebGLRenderer({canvas,antialias:true,alpha:true});
+  R.setPixelRatio(Math.min(devicePixelRatio,2)); R.setSize(W,H); R.setClearColor(0,0);
+  const S=new THREE.Scene(),C=new THREE.PerspectiveCamera(42,W/H,.01,100);
+  C.position.set(0,0,3.4);
+  S.add(new THREE.AmbientLight(0x001824,2.2));
+  const f=new THREE.DirectionalLight(0x00dfc4,li); f.position.set(0,1,3); S.add(f);
+  const rL=new THREE.DirectionalLight(0x0088ff,.85); rL.position.set(-2,.3,-.5); S.add(rL);
+  const rR=new THREE.DirectionalLight(0x00b8ff,.65); rR.position.set(2,.5,-.5); S.add(rR);
+  const fl=new THREE.PointLight(0x002244,1.4,10); fl.position.set(0,-1.2,2); S.add(fl);
+  return {R,S,C};
+}
+
+function addDrag(cid,rot,cb){
+  const c=document.getElementById(cid); let dr=false,lx=0,ly=0;
+  function dn(x,y){dr=true;lx=x;ly=y;}
+  function mv(x,y){ if(!dr)return; rot.y+=(x-lx)*.009; rot.x+=(y-ly)*.006; rot.x=Math.max(-.55,Math.min(.55,rot.x)); lx=x;ly=y; if(cb)cb(); }
+  function up(){dr=false;}
+  c.addEventListener('mousedown',e=>dn(e.clientX,e.clientY));
+  c.addEventListener('mousemove',e=>mv(e.clientX,e.clientY));
+  c.addEventListener('mouseup',up); c.addEventListener('mouseleave',up);
+  c.addEventListener('touchstart',e=>dn(e.touches[0].clientX,e.touches[0].clientY),{passive:true});
+  c.addEventListener('touchmove',e=>{e.preventDefault();mv(e.touches[0].clientX,e.touches[0].clientY);},{passive:false});
+  c.addEventListener('touchend',up);
+}
+
+// ─ AUTO ROTATE: one pass then stop ─
+const AUTO_SPEED=0.013, AUTO_TOTAL=Math.PI*1.5;
+
+function applyRot(objs,rot){
+  if(!objs)return;
+  objs.forEach(o=>{ if(o)o.rotation.set(rot.x,rot.y,0); });
+}
+
+// ─ ANALYZE ─
+function ensureA(){
+  if(G.aR){ fillMetrics(G.metrics); return; }
+  const {R,S,C}=mkScene('cva',1.6); G.aR=R;G.aS=S;G.aC=C;
+  const geo=buildGeo({}, G.metrics||{});
+  const mat=new THREE.MeshPhysicalMaterial({color:0xc8a07a,roughness:.52,metalness:.04,transparent:true,opacity:.75});
+  const face=new THREE.Mesh(geo,mat); S.add(face);
+  const wg=new THREE.WireframeGeometry(geo);
+  const wm=new THREE.LineBasicMaterial({color:0x00dfc4,transparent:true,opacity:.13});
+  const wire=new THREE.LineSegments(wg,wm); S.add(wire);
+  const LP=[.28,.22,.27,-.28,.22,.27, 0,.05,.40, .12,.02,.36,-.12,.02,.36, .19,-.28,.31,-.19,-.28,.31,0,-.28,.32, .38,.22,.23,-.38,.22,.23,.18,.22,.28,-.18,.22,.28, .22,.35,.22,-.22,.35,.22,.38,.34,.19,-.38,.34,.19, 0,-.48,-.04,0,.48,.08, .42,0,-.02,-.42,0,-.02, .42,.08,.20,-.42,.08,.20];
+  const pg=new THREE.BufferGeometry(); pg.setAttribute('position',new THREE.BufferAttribute(new Float32Array(LP),3));
+  const pm=new THREE.PointsMaterial({color:0x00dfc4,size:.038,sizeAttenuation:true,transparent:true,opacity:.95});
+  const pts=new THREE.Points(pg,pm); S.add(pts);
+  function er(x,y,z){ const p=[]; for(let i=0;i<=64;i++){const a=i/64*Math.PI*2;p.push(x+Math.cos(a)*.14,y+Math.sin(a)*.09,z);} const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.BufferAttribute(new Float32Array(p),3)); return new THREE.Line(g,new THREE.LineBasicMaterial({color:0x00b8ff,transparent:true,opacity:.28})); }
+  S.add(er(.28,.22,.28)); S.add(er(-.28,.22,.28));
+  G.aObjs=[face,wire,pts];
+
+  addDrag('cva',G.aRot,()=>{ G.userDragged=true; const h=document.getElementById('dragh'); if(h)h.classList.add('hide'); });
+
+  let t=0;
+  (function loop(){
+    requestAnimationFrame(loop); t+=.014;
+    // one auto pass
+    if(!G.autoDone&&!G.userDragged){ G.autoY+=AUTO_SPEED; G.aRot.y=G.autoY; if(G.autoY>=AUTO_TOTAL){G.autoDone=true;G.aRot.y=G.autoY%(Math.PI*2);} }
+    applyRot([face,wire,pts],G.aRot);
+    face.scale.setScalar(1+Math.sin(t)*.004);
+    pm.opacity=.6+Math.sin(t*1.6)*.35; wm.opacity=.10+Math.sin(t*.8)*.05;
+    R.render(S,C);
+  })();
+  fillMetrics(G.metrics);
+}
+
+// ─ STYLE ─
+const SC={neural:{b:0x7070b0,e:0x001022,w:0x00dfc4},chrome:{b:0x909aaa,e:0x060810,w:0xb0c0d0},ember:{b:0xa05020,e:0x140200,w:0xff7040},bio:{b:0x306040,e:0x020e04,w:0x3dffa0},frost:{b:0x304870,e:0x020610,w:0x80c8ff},dusk:{b:0x603070,e:0x0c0214,w:0xc084fc}};
+
+function ensureS(){
+  if(G.sR){ updSMat(); return; }
+  const {R,S,C}=mkScene('cvs',1.8); G.sR=R;G.sS=S;G.sC=C;
+  const geo=buildGeo({}, G.metrics||{}), cfg=SC[G.styleKey];
+  const mat=new THREE.MeshPhysicalMaterial({color:new THREE.Color(cfg.b),emissive:new THREE.Color(cfg.e),roughness:.38,metalness:.22,transparent:true,opacity:.82});
+  const face=new THREE.Mesh(geo,mat); S.add(face);
+  const wg=new THREE.WireframeGeometry(geo);
+  const wm=new THREE.LineBasicMaterial({color:new THREE.Color(cfg.w),transparent:true,opacity:.32});
+  const wire=new THREE.LineSegments(wg,wm); S.add(wire);
+  G.sObjs={face,mat,wm,wire};
+
+  addDrag('cvs',G.sRot,()=>{ G.userDragged=true; });
+  (function loop(){ requestAnimationFrame(loop);
+    if(!G.autoDone&&!G.userDragged){ G.sRot.y=G.autoY; }
+    [face,wire].forEach(o=>o.rotation.set(G.sRot.x,G.sRot.y,0));
+    G.sR.render(G.sS,G.sC);
+  })();
+}
+function updSMat(){ if(!G.sObjs)return; const cfg=SC[G.styleKey]; G.sObjs.mat.color.set(cfg.b); G.sObjs.mat.emissive.set(cfg.e); G.sObjs.wm.color.set(cfg.w); G.sObjs.mat.opacity=.4+G.stInt*.48; }
+function setSt(el,key,lbl,col){ document.querySelectorAll('.sw').forEach(s=>s.classList.remove('on')); el.classList.add('on'); G.styleKey=key; const b=document.getElementById('sbdg'); b.textContent=`3D AI STYLE · ${lbl}`; b.style.color=col; b.style.borderColor=col+'40'; updSMat(); toast('Style: '+lbl); }
+function onInt(v){ G.stInt=v/100; document.getElementById('inv').textContent=v+'%'; updSMat(); }
+
+// ─ ADJUST ─
+function ensureD(){
+  if(G.dR){ rebuildD(); return; }
+  const {R,S,C}=mkScene('cva2',1.5); G.dR=R;G.dS=S;G.dC=C;
+  const geo=buildGeo(G.adjP, G.metrics||{});
+  const mat=new THREE.MeshPhysicalMaterial({color:0xc0906a,roughness:.5,metalness:.06,transparent:true,opacity:.8});
+  const face=new THREE.Mesh(geo,mat); S.add(face);
+  const wg=new THREE.WireframeGeometry(geo);
+  const wm=new THREE.LineBasicMaterial({color:0x00dfc4,transparent:true,opacity:.18});
+  const wire=new THREE.LineSegments(wg,wm); S.add(wire);
+  G.dObjs={face,wire};
+
+  addDrag('cva2',G.dRot,()=>{ G.userDragged=true; });
+  (function loop(){ requestAnimationFrame(loop);
+    if(!G.autoDone&&!G.userDragged){ G.dRot.y=G.autoY; }
+    [face,wire].forEach(o=>o.rotation.set(G.dRot.x,G.dRot.y,0));
+    G.dR.render(G.dS,G.dC);
+  })();
+}
+let aDB=null;
+function onA(k,v){ G.adjP[k]=v; const el=document.getElementById('v-'+k); if(el)el.textContent=v>0?'+'+v:v; clearTimeout(aDB); aDB=setTimeout(rebuildD,70); }
+function rebuildD(){ if(!G.dObjs)return; const ng=buildGeo(G.adjP,G.metrics||{}); G.dObjs.face.geometry.dispose(); G.dObjs.face.geometry=ng; G.dObjs.wire.geometry.dispose(); G.dObjs.wire.geometry=new THREE.WireframeGeometry(ng); }
+function resetA(){ ['width','jaw','chin','nose','lip','brow'].forEach(k=>{ G.adjP[k]=0; const sl=document.querySelector(`[oninput*="'${k}'"]`); if(sl)sl.value=0; const v=document.getElementById('v-'+k); if(v)v.textContent='0'; }); rebuildD(); toast('Reset to base model'); }
+
+// ─ CAMERA ─
+async function initCam(){
+  if(G.camActive)return;
+  const v=document.getElementById('camv'),ov=document.getElementById('camo');
+  try{
+    G.camStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:G.facing,width:{ideal:640},height:{ideal:480}},audio:false});
+    v.srcObject=G.camStream; await v.play();
+    ov.width=ov.parentElement.clientWidth; ov.height=ov.parentElement.clientHeight;
+    const {mp,cam}=startMP(v,onCamRes); G.camMp=mp; G.camMpCam=cam; G.camActive=true;
+  } catch(e){ console.warn(e); }
+}
+function onCamRes(res){
+  const ov=document.getElementById('camo'),ctx=ov.getContext('2d'),W=ov.width,H=ov.height; ctx.clearRect(0,0,W,H);
+  const fb=document.getElementById('fbox');
+  if(!res.multiFaceLandmarks||!res.multiFaceLandmarks.length){ fb.style.display='none'; document.getElementById('cam-pts').textContent='No face detected'; return; }
+  const lms=res.multiFaceLandmarks[0]; document.getElementById('cam-pts').textContent='468 pts · Active';
+  let mnX=1,mxX=0,mnY=1,mxY=0; lms.forEach(l=>{mnX=Math.min(mnX,l.x);mxX=Math.max(mxX,l.x);mnY=Math.min(mnY,l.y);mxY=Math.max(mxY,l.y);});
+  const pad=.04; fb.style.display='block'; fb.style.left=Math.max(0,(1-(mxX+pad))*W)+'px'; fb.style.top=Math.max(0,(mnY-pad)*H)+'px'; fb.style.width=Math.min(W,(mxX-mnX+pad*2)*W)+'px'; fb.style.height=Math.min(H,(mxY-mnY+pad*2)*H)+'px';
+  ctx.save(); ctx.translate(W,0); ctx.scale(-1,1);
+  [[TESS_OUTER,'rgba(0,223,196,0.2)'],[TESS_LE,'rgba(0,184,255,0.26)'],[TESS_RE,'rgba(0,184,255,0.26)'],[TESS_LIPS,'rgba(0,223,196,0.18)']].forEach(([g,col])=>{
+    ctx.beginPath(); g.forEach((i,k)=>{ const l=lms[i]||{x:0,y:0}; k===0?ctx.moveTo(l.x*W,l.y*H):ctx.lineTo(l.x*W,l.y*H); });
+    ctx.strokeStyle=col; ctx.lineWidth=.85; ctx.stroke();
+  });
+  lms.forEach((l,i)=>{ const k=KEY_IDS.includes(i); ctx.beginPath(); ctx.arc(l.x*W,l.y*H,k?2.8:1.1,0,Math.PI*2); ctx.fillStyle=k?'rgba(0,223,196,.95)':'rgba(0,184,255,.4)'; ctx.fill(); });
+  ctx.restore();
+}
+function flipCam(){ G.facing=G.facing==='user'?'environment':'user'; if(G.camStream)G.camStream.getTracks().forEach(t=>t.stop()); if(G.camMpCam)G.camMpCam.stop(); G.camActive=false; G.camMp=null; G.camMpCam=null; initCam(); }
+function capturePhoto(){
+  const f=document.getElementById('flash'); f.classList.add('on'); setTimeout(()=>f.classList.remove('on'),150);
+  const v=document.getElementById('camv'),ov=document.getElementById('camo'),pc=document.getElementById('phcanv'),ctx=pc.getContext('2d');
+  pc.width=260;pc.height=340;
+  if(v.srcObject){ ctx.save();ctx.translate(260,0);ctx.scale(-1,1);ctx.drawImage(v,0,0,260,340);ctx.restore(); ctx.globalAlpha=.65;ctx.drawImage(ov,0,0,ov.width,ov.height,0,0,260,340);ctx.globalAlpha=1; }
+  else{ ctx.fillStyle='#0a1828';ctx.fillRect(0,0,260,340); }
+  ctx.fillStyle='rgba(0,223,196,.7)';ctx.font='7px DM Mono,monospace';ctx.fillText('MIRRA · TRUEFACE™ · '+new Date().toLocaleTimeString('en-US'),8,328);
+  document.getElementById('pprev').classList.add('show');
+}
+function discP(){ document.getElementById('pprev').classList.remove('show'); }
+function saveP(){ document.getElementById('pprev').classList.remove('show'); toast('Saved · Trueface™ enhanced'); }
+function selCC(el,m){ document.querySelectorAll('.cc').forEach(c=>c.classList.remove('on')); el.classList.add('on'); document.getElementById('tfsub').textContent=m+' mode active'; }
+
+// ─ STYLE UPLOAD ─
+function onStyleUpload(input){
+  const f=input.files[0]; if(!f)return;
+  const url=URL.createObjectURL(f);
+  const img=document.getElementById('st-thumb-img');
+  const plus=document.getElementById('st-thumb-plus');
+  img.src=url; img.style.display='block'; plus.style.display='none';
+  document.getElementById('st-source-name').textContent=f.name.replace(/\.[^.]+$/,'');
+  toast('Style source loaded — transferring…');
+}
+
+// ═══ BOOT ═══
+window.addEventListener('DOMContentLoaded',()=>{ initScan(); });
+</script>
+</body>
+</html>
