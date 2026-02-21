@@ -728,11 +728,11 @@ function onScanRes(res){
   const ov=document.getElementById('so'); const ctx=ov.getContext('2d');
   const W=ov.width,H=ov.height; ctx.clearRect(0,0,W,H);
   if(!res.multiFaceLandmarks||!res.multiFaceLandmarks.length){ G.faceQ=Math.max(0,G.faceQ-4); updQ(); return; }
-  const lms=res.multiFaceLandmarks[0]; G.latestLms=lms;
+  const lms=res.multiFaceLandmarks[0]; G.latestLms=normalizeLms(lms);
   const nt=lms[4]; const dist=Math.sqrt((nt.x-.5)**2+(nt.y-.46)**2);
   G.faceQ=Math.min(100,Math.max(0,100-dist*310)); updQ();
   drawScanLms(ctx,lms,W,H);
-  if(G.scanRunning) G.scanFrames.push(lms);
+  if(G.scanRunning) G.scanFrames.push(normalizeLms(lms));
   // Enable button once face is first detected
   const btn=document.getElementById('scanbtn');
   if(btn&&btn.disabled&&!G.scanRunning) btn.disabled=false;
@@ -760,7 +760,27 @@ function drawScanLms(ctx,lms,W,H){
   ctx.restore();
 }
 
-function avgLms(frames){ if(!frames.length)return G.latestLms; const n=frames[0].length; return Array.from({length:n},(_,i)=>{ let sx=0,sy=0,sz=0; frames.forEach(f=>{sx+=f[i].x;sy+=f[i].y;sz+=f[i].z||0;}); return{x:sx/frames.length,y:sy/frames.length,z:sz/frames.length}; }); }
+function normalizeLms(lms){
+  // Convert MediaPipe NormalizedLandmarkList (Proxy) to plain array of {x,y,z}
+  const arr=[];
+  for(let i=0;i<(lms.length||478);i++){
+    const l=lms[i];
+    if(l) arr.push({x:+(l.x||0),y:+(l.y||0),z:+(l.z||0)});
+    else   arr.push({x:.5,y:.5,z:0});
+  }
+  return arr;
+}
+function avgLms(frames){
+  if(!frames||!frames.length) return G.latestLms ? normalizeLms(G.latestLms) : null;
+  // Normalize all frames first
+  const nFrames=frames.map(normalizeLms);
+  const n=nFrames[0].length;
+  return Array.from({length:n},(_,i)=>{
+    let sx=0,sy=0,sz=0;
+    nFrames.forEach(f=>{ sx+=f[i].x; sy+=f[i].y; sz+=f[i].z; });
+    return{x:sx/nFrames.length, y:sy/nFrames.length, z:sz/nFrames.length};
+  });
+}
 
 function startScan(){
   if(G.scanRunning||!G.latestLms){ if(!G.latestLms)toast('Align your face first'); return; }
@@ -806,26 +826,48 @@ function startScan(){
   // (frames already collected via onScanRes while G.scanRunning=true)
 
   function finishScan(){
-    ['ht-left','ht-right','ht-up','ht-down'].forEach(id=>{ document.getElementById(id).style.opacity='0'; });
-    document.getElementById('scan-check').style.opacity='1';
+    // UI: show completion state
+    ['ht-left','ht-right','ht-up','ht-down'].forEach(id=>{
+      const el=document.getElementById(id); if(el) el.style.opacity='0';
+    });
+    const chk=document.getElementById('scan-check'); if(chk) chk.style.opacity='1';
     sm.textContent='Scan complete'; ss.textContent='BUILDING YOUR 3D MODEL…';
-    // Step 4 done
-    for(let d=0;d<4;d++){ const el=document.getElementById('sstep-'+d); if(el)el.className='sstep done'; }
+    for(let d=0;d<4;d++){ const el=document.getElementById('sstep-'+d); if(el) el.className='sstep done'; }
 
     G.scanRunning=false;
-    const avg=avgLms(G.scanFrames.length>0?G.scanFrames:[G.latestLms]);
-    G.lms=avg; G.metrics=computeMetrics(avg);
-    if(G.scanStream){ G.scanStream.getTracks().forEach(t=>t.stop()); G.scanStream=null; }
-    if(G.scanMpCam){ G.scanMpCam.stop(); }
 
-    setTimeout(()=>{ toast('3D model built · 468 landmarks locked'); }, 200);
-    setTimeout(()=>{ goTo('s-analyze'); setTimeout(()=>{ ensureA(); opnP('ppa'); },80); }, 900);
+    // Stop camera FIRST (sync), before any async work
+    try{ if(G.scanMpCam){ G.scanMpCam.stop(); G.scanMpCam=null; } }catch(e){}
+    try{ if(G.scanStream){ G.scanStream.getTracks().forEach(t=>t.stop()); G.scanStream=null; } }catch(e){}
+
+    // Compute metrics safely
+    try{
+      const raw=G.scanFrames.length>0 ? G.scanFrames : (G.latestLms ? [G.latestLms] : null);
+      if(raw){
+        const avg=avgLms(raw);
+        G.lms=avg;
+        G.metrics=computeMetrics(avg);
+      }
+    }catch(e){
+      console.error('computeMetrics failed:',e);
+      G.metrics=null;
+    }
+
+    // Navigate regardless of metrics success
+    setTimeout(()=>{ toast('3D model built · 468 landmarks locked'); }, 100);
+    setTimeout(()=>{
+      try{ goTo('s-analyze'); }catch(e){ console.error('goTo failed:',e); }
+      setTimeout(()=>{
+        try{ ensureA(); }catch(e){ console.error('ensureA failed:',e); }
+        try{ opnP('ppa'); }catch(e){}
+      }, 120);
+    }, 700);
   }
 }
 
 // ═══ METRICS ═══
 function computeMetrics(lms){
-  function p(i){ return lms[Math.min(i,lms.length-1)]||{x:.5,y:.5,z:0}; }
+  function p(i){ const l=lms[Math.min(i,(lms.length||0)-1)]; return l?{x:l.x||0,y:l.y||0,z:l.z||0}:{x:.5,y:.5,z:0}; }
   function dxy(a,b){ return Math.sqrt((a.x-b.x)**2+(a.y-b.y)**2); }
   // Eyes
   const leW=dxy(p(33),p(133)),reW=dxy(p(362),p(263)),egap=dxy(p(133),p(362)),eAvg=(leW+reW)/2;
@@ -885,29 +927,36 @@ function computeMetrics(lms){
   const mandibRatio = mandibW / (cheekW + 0.001);
   // Nose tip projection (nose tip z-depth relative to face) – already in nH via MediaPipe z
   // We use relative values from lms z for tip vs side face
-  const noseTipZ = -(lms[4].z || 0);
-  const templeZ  = -(lms[234].z || 0);
+  const noseTipZ = -(p(4).z || 0);
+  const templeZ  = -(p(234).z || 0);
   const noseProjection = Math.max(0, Math.min(100, 50 + noseTipZ * 400));
+
+  // Pre-compute scaled values needed for sliders
+  const t1mm  = +(t1*sc).toFixed(1);
+  const t2mm  = +(t2*sc).toFixed(1);
+  const t3mm  = +(t3*sc).toFixed(1);
+  const lipHmm   = +(lipH*sc).toFixed(1);
+  const browAmm  = +(browA*sc).toFixed(2);
 
   return {
     sym, gScore, gr:+gr.toFixed(3), sh, es,
     egMM:Math.round(egap*sc), fWmm:Math.round(fW*sc), fHmm:Math.round(fH*sc),
     nWmm:Math.round(nW*sc), mWmm:Math.round(mW*sc),
     leW:+(leW*sc).toFixed(1), reW:+(reW*sc).toFixed(1),
-    browAmm:+(browA*sc).toFixed(2), jawAng,
+    browAmm, jawAng,
     // Extended anatomy
-    philtrumMM: +(philtrumH*sc).toFixed(1),
+    philtrumMM:  +(philtrumH*sc).toFixed(1),
     thirds_balance: +thirds_balance.toFixed(1),
-    t1mm: +(t1*sc).toFixed(1), t2mm: +(t2*sc).toFixed(1), t3mm: +(t3*sc).toFixed(1),
+    t1mm, t2mm, t3mm,
     fiveEyesRatio: +fiveEyesRatio.toFixed(2),
-    temporalIdx: +temporalIdx.toFixed(3),
-    noseEyeRatio: +noseEyeRatio.toFixed(2),
+    temporalIdx:   +temporalIdx.toFixed(3),
+    noseEyeRatio:  +noseEyeRatio.toFixed(2),
     mouthEyeRatio: +mouthEyeRatio.toFixed(2),
-    lipHmm: +(lipH*sc).toFixed(1),
-    chinPromMM: +(chinProm*sc).toFixed(1),
+    lipHmm,
+    chinPromMM:  +(chinProm*sc).toFixed(1),
     mandibRatio: +mandibRatio.toFixed(2),
     noseProjection: +noseProjection.toFixed(0),
-    // Derived slider init values (mapped from real data for adjust screen)
+    // Slider init values derived from real measurements
     _sliderWidth: Math.round(Math.max(-50, Math.min(50, (fiveEyesRatio - 4.8) * 20))),
     _sliderJaw:   Math.round(Math.max(-50, Math.min(50, (mandibRatio - 0.75) * 100))),
     _sliderChin:  Math.round(Math.max(-50, Math.min(50, (t3mm - t2mm) * 1.5))),
